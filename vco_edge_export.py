@@ -52,16 +52,14 @@ def api_call(method, params):
 
 
 def get_enterprise_ids():
-
-    method = "enterprise/getEnterprisesWithProperty"
+    method = "network/getNetworkEnterprises"
 
     params = {
-        "name": "vco.enterprise.edgeImageManagement.enable",
-        "value": "true"
-    }
+            "networkId": 1,
+            "with": ["edges"]
+        }
 
     parsed = api_call(method, params)
-
     return [
         {
             "id": item.get("id"),
@@ -100,8 +98,7 @@ def get_edges(ent):
             "cloudServices",
             "nvsFromEdge",
             "vnfs",
-            "certificateSummary",
-            "secureDeviceSecrets"
+            "certificateSummary"
         ],
         "sortBy": [
             {
@@ -187,6 +184,7 @@ if __name__ == "__main__":
     enterprise_ids = get_enterprise_ids()
 
     print(f"Found {len(enterprise_ids)} enterprises")
+
 
     for ent in enterprise_ids:
 
