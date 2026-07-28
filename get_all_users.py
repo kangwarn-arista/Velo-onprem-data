@@ -1,4 +1,5 @@
 import json
+import time
 import urllib3
 import requests
 import pandas as pd
@@ -17,6 +18,8 @@ load_dotenv()
 
 token = os.getenv("VCO_TOKEN")
 vco_url = os.getenv("VCO_URL")
+if vco_url and not vco_url.endswith("/"):
+    vco_url += "/"
 
 OUTPUT_XLSX = "vco_user_audit.xlsx"
 
@@ -32,43 +35,80 @@ ROLE_MAP = {
 }
 
 
-def api_call(method, params):
+class VCOAuthError(Exception):
+    pass
+
+
+def api_call(method, params, max_retries=5):
     headers = CaseInsensitiveDict()
     headers["Authorization"] = token
     headers["Content-Type"] = "application/x-www-form-urlencoded"
 
-    data = {
-        "id": 0,
-        "jsonrpc": "2.0",
-        "method": method,
-        "params": params
-    }
+    data = {"id": 0, "jsonrpc": "2.0", "method": method, "params": params}
 
-    try:
-        resp = requests.post(vco_url, headers=headers, data=json.dumps(data), verify=False)
-        return resp.json()
-    except Exception as e:
-        print(f"API Error: {e}")
-        return {}
+    for attempt in range(max_retries):
+        try:
+            resp = requests.post(
+                vco_url, headers=headers, data=json.dumps(data), verify=False
+            )
+
+            if resp.status_code in (401, 403):
+                raise VCOAuthError(
+                    f"Authentication failed (HTTP {resp.status_code}). "
+                    f"Check that VCO_TOKEN in .env is valid and not expired."
+                )
+
+            if resp.status_code == 429:
+                retry_after = int(resp.headers.get("Retry-After", 2 ** attempt))
+                print(f"  Rate limited (429) on {method}, retrying in {retry_after}s (attempt {attempt + 1}/{max_retries})")
+                time.sleep(retry_after)
+                continue
+
+            resp.raise_for_status()
+            result = resp.json()
+
+            if "error" in result:
+                error_msg = result["error"]
+                if isinstance(error_msg, dict):
+                    error_msg = error_msg.get("message", str(error_msg))
+                raise VCOAuthError(
+                    f"VCO API rejected request to '{method}': {error_msg}. "
+                    f"This typically indicates an invalid or expired token."
+                )
+
+            return result
+
+        except VCOAuthError:
+            raise
+        except requests.exceptions.HTTPError as e:
+            print(f"API Error: {e}")
+            return {}
+        except Exception as e:
+            print(f"API Error: {e}")
+            return {}
+
+    print(f"API Error: max retries exceeded for {method}")
+    return {}
 
 
 def get_enterprise_ids():
-    parsed = api_call("network/getNetworkEnterprises", {"networkId": 1, "with": ["edges"]})
+    parsed = api_call(
+        "network/getNetworkEnterprises", {"networkId": 1, "with": ["edges"]}
+    )
     return [
         {
             "id": item.get("id"),
             "name": item.get("name"),
-            "logicalId": item.get("logicalId", "")
+            "logicalId": item.get("logicalId", ""),
         }
         for item in parsed.get("result", [])
     ]
 
 
 def get_enterprise_details(ent_id):
-    return api_call("enterprise/getEnterprise", {
-        "id": ent_id,
-        "with": ["enterpriseProxy"]
-    })
+    return api_call(
+        "enterprise/getEnterprise", {"id": ent_id, "with": ["enterpriseProxy"]}
+    )
 
 
 def get_enterprise_users(ent_id):
@@ -98,23 +138,23 @@ def safe_get(d, *keys):
 
 # ── Styling helpers ──────────────────────────────────────────────────────────
 
-HEADER_FILL   = PatternFill("solid", start_color="1F3864")   # dark navy
-ALT_FILL      = PatternFill("solid", start_color="DCE6F1")   # light blue
-WHITE_FILL    = PatternFill("solid", start_color="FFFFFF")
-HEADER_FONT   = Font(name="Arial", bold=True, color="FFFFFF", size=10)
-CELL_FONT     = Font(name="Arial", size=10)
-BOLD_FONT     = Font(name="Arial", bold=True, size=10)
-CENTER        = Alignment(horizontal="center", vertical="center", wrap_text=True)
-LEFT          = Alignment(horizontal="left",   vertical="center", wrap_text=True)
+HEADER_FILL = PatternFill("solid", start_color="1F3864")  # dark navy
+ALT_FILL = PatternFill("solid", start_color="DCE6F1")  # light blue
+WHITE_FILL = PatternFill("solid", start_color="FFFFFF")
+HEADER_FONT = Font(name="Arial", bold=True, color="FFFFFF", size=10)
+CELL_FONT = Font(name="Arial", size=10)
+BOLD_FONT = Font(name="Arial", bold=True, size=10)
+CENTER = Alignment(horizontal="center", vertical="center", wrap_text=True)
+LEFT = Alignment(horizontal="left", vertical="center", wrap_text=True)
 
 THIN = Side(style="thin", color="B0B0B0")
 THIN_BORDER = Border(left=THIN, right=THIN, top=THIN, bottom=THIN)
 
 ROLE_COLORS = {
-    "Super User":     "FF4444",
+    "Super User": "FF4444",
     "Standard Admin": "4472C4",
-    "Read Only":      "70AD47",
-    "Unknown":        "808080",
+    "Read Only": "70AD47",
+    "Unknown": "808080",
 }
 
 
@@ -160,13 +200,19 @@ def write_section_title(ws, row, col_count, title):
 
 # ── Sheet builders ────────────────────────────────────────────────────────────
 
+
 def build_enterprise_sheet(wb, enterprise_rows):
     ws = wb.create_sheet("Enterprise Users")
     ws.freeze_panes = "A2"
 
     headers = [
-        "Enterprise Name", "Partner Name",
-        "Username", "Email", "First Name", "Last Name", "Role"
+        "Enterprise Name",
+        "Partner Name",
+        "Username",
+        "Email",
+        "First Name",
+        "Last Name",
+        "Role",
     ]
     widths = [30, 25, 25, 35, 18, 18, 18]
 
@@ -175,11 +221,17 @@ def build_enterprise_sheet(wb, enterprise_rows):
     ws.row_dimensions[1].height = 22
 
     for i, r in enumerate(enterprise_rows, start=2):
-        ws.append([
-            r["enterprise_name"], r["partner_name"],
-            r["username"], r["email"], r["first_name"], r["last_name"],
-            r["role"]
-        ])
+        ws.append(
+            [
+                r["enterprise_name"],
+                r["partner_name"],
+                r["username"],
+                r["email"],
+                r["first_name"],
+                r["last_name"],
+                r["role"],
+            ]
+        )
         style_data_row(ws, i, len(headers), alternate=(i % 2 == 0))
         add_role_badge(ws, i, 7, r["role"])
 
@@ -192,9 +244,7 @@ def build_partner_sheet(wb, partner_rows):
     ws = wb.create_sheet("Partner (Operator) Users")
     ws.freeze_panes = "A2"
 
-    headers = [
-        "Email", "First Name", "Last Name", "Role"
-    ]
+    headers = ["Email", "First Name", "Last Name", "Role"]
     widths = [35, 18, 18, 25]
 
     ws.append(headers)
@@ -202,9 +252,7 @@ def build_partner_sheet(wb, partner_rows):
     ws.row_dimensions[1].height = 22
 
     for i, r in enumerate(partner_rows, start=2):
-        ws.append([
-            r["email"], r["first_name"], r["last_name"], r["role"]
-        ])
+        ws.append([r["email"], r["first_name"], r["last_name"], r["role"]])
         style_data_row(ws, i, len(headers), alternate=(i % 2 == 0))
         add_role_badge(ws, i, 4, r["role"])
 
@@ -263,12 +311,25 @@ if __name__ == "__main__":
 
     # ── 1. Enterprises ──
     print("Fetching enterprises...")
-    enterprises = get_enterprise_ids()
+    try:
+        enterprises = get_enterprise_ids()
+    except VCOAuthError as e:
+        print(f"ERROR: {e}")
+        exit(1)
+
+    if not enterprises:
+        print(
+            "ERROR: No enterprises returned from VCO. "
+            "This usually means the API token is invalid, expired, "
+            "or lacks permissions. Verify VCO_TOKEN in .env."
+        )
+        exit(1)
+
     print(f"  Found {len(enterprises)} enterprises")
 
     # ── 2. Partner name per enterprise ──
     print("Fetching partner names for each enterprise...")
-    partner_map = {}   # enterprise_id -> partner_name
+    partner_map = {}  # enterprise_id -> partner_name
     for ent in enterprises:
         details = get_enterprise_details(ent["id"])
         partner_name = safe_get(details.get("result", {}), "enterpriseProxy", "name")
@@ -282,14 +343,16 @@ if __name__ == "__main__":
     partner_rows = []
     for u in operator_users:
         role_name = u.get("roleName", "")
-        partner_rows.append({
-            "username":   u.get("username", ""),
-            "email":      u.get("email", ""),
-            "first_name": u.get("firstName", ""),
-            "last_name":  u.get("lastName", ""),
-            "role":       role_name,
-            "raw_role":   role_name,
-        })
+        partner_rows.append(
+            {
+                "username": u.get("username", ""),
+                "email": u.get("email", ""),
+                "first_name": u.get("firstName", ""),
+                "last_name": u.get("lastName", ""),
+                "role": role_name,
+                "raw_role": role_name,
+            }
+        )
 
     # ── 4. Enterprise users ──
     enterprise_rows = []
@@ -299,17 +362,19 @@ if __name__ == "__main__":
         print(f"    {len(users)} users found")
         for u in users:
             role_name = u.get("roleName", "")
-            enterprise_rows.append({
-                "enterprise_name": ent["name"],
-                "partner_name":    partner_map.get(ent["id"], ""),
-                "enterprise_id":   ent["id"],
-                "username":        u.get("username", ""),
-                "email":           u.get("email", ""),
-                "first_name":      u.get("firstName", ""),
-                "last_name":       u.get("lastName", ""),
-                "role":            role_name,
-                "raw_role":        role_name,
-            })
+            enterprise_rows.append(
+                {
+                    "enterprise_name": ent["name"],
+                    "partner_name": partner_map.get(ent["id"], ""),
+                    "enterprise_id": ent["id"],
+                    "username": u.get("username", ""),
+                    "email": u.get("email", ""),
+                    "first_name": u.get("firstName", ""),
+                    "last_name": u.get("lastName", ""),
+                    "role": role_name,
+                    "raw_role": role_name,
+                }
+            )
 
     # ── 5. Write XLSX ──
     print("\nWriting Excel output...")
