@@ -1,0 +1,20 @@
+# Output files
+*.xlsx
+*.csv
+
+# Secrets
+.env
+
+# Virtual environments
+.venv/
+
+# GSD planning artifacts
+.planning/
+
+# Claude Code tooling
+CLAUDE.md
+.claude/
+
+# Python
+__pycache__/
+*.pyc

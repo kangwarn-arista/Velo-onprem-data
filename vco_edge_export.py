@@ -1,10 +1,11 @@
+import io
 import json
+import time
 import urllib3
 import requests
 import pandas as pd
 
 from dotenv import load_dotenv
-from datetime import datetime
 from requests.structures import CaseInsensitiveDict
 import os
 
@@ -17,71 +18,82 @@ load_dotenv()
 # Read variables from .env
 token = os.getenv("VCO_TOKEN")
 vco_url = os.getenv("VCO_URL")
+if vco_url and not vco_url.endswith("/"):
+    vco_url += "/"
 
-OUTPUT_XLSX = "edges_output.xlsx"
+OUTPUT_CSV = "vco_edge_export.csv"
 
 
-def api_call(method, params):
+class VCOAuthError(Exception):
+    pass
 
+
+def api_call(method, params, max_retries=5):
     headers = CaseInsensitiveDict()
     headers["Authorization"] = token
     headers["Content-Type"] = "application/x-www-form-urlencoded"
 
-    data = {
-        "id": 0,
-        "jsonrpc": "2.0",
-        "method": method,
-        "params": params
-    }
+    data = {"id": 0, "jsonrpc": "2.0", "method": method, "params": params}
 
-    try:
+    for attempt in range(max_retries):
+        try:
+            resp = requests.post(
+                vco_url, headers=headers, data=json.dumps(data), verify=False
+            )
 
-        resp = requests.post(
-            vco_url,
-            headers=headers,
-            data=json.dumps(data),
-            verify=False
-        )
+            if resp.status_code in (401, 403):
+                raise VCOAuthError(
+                    f"Authentication failed (HTTP {resp.status_code}). "
+                    f"Check that VCO_TOKEN in .env is valid and not expired."
+                )
 
-        return resp.json()
+            if resp.status_code == 429:
+                retry_after = int(resp.headers.get("Retry-After", 2 ** attempt))
+                print(f"  Rate limited (429) on {method}, retrying in {retry_after}s (attempt {attempt + 1}/{max_retries})")
+                time.sleep(retry_after)
+                continue
 
-    except Exception as e:
+            resp.raise_for_status()
+            result = resp.json()
 
-        print(f"API Error: {e}")
-        return {}
+            if "error" in result:
+                error_msg = result["error"]
+                if isinstance(error_msg, dict):
+                    error_msg = error_msg.get("message", str(error_msg))
+                raise VCOAuthError(
+                    f"VCO API rejected request to '{method}': {error_msg}. "
+                    f"This typically indicates an invalid or expired token."
+                )
+
+            return result
+
+        except VCOAuthError:
+            raise
+        except requests.exceptions.HTTPError as e:
+            print(f"API Error: {e}")
+            return {}
+        except Exception as e:
+            print(f"API Error: {e}")
+            return {}
+
+    print(f"API Error: max retries exceeded for {method}")
+    return {}
 
 
 def get_enterprise_ids():
     method = "network/getNetworkEnterprises"
 
-    params = {
-            "networkId": 1,
-            "with": ["edges"]
-        }
+    params = {"networkId": 1, "with": ["edges"]}
 
     parsed = api_call(method, params)
     return [
         {
             "id": item.get("id"),
             "name": item.get("name"),
-            "logicalId": item.get("logicalId", "")
+            "logicalId": item.get("logicalId", ""),
         }
         for item in parsed.get("result", [])
     ]
-
-
-def get_enterprise_details(ent_id):
-
-    method = "enterprise/getEnterprise"
-
-    params = {
-        "id": ent_id,
-        "with": [
-            "enterpriseProxy"
-        ]
-    }
-
-    return api_call(method, params)
 
 
 def get_edges(ent):
@@ -98,70 +110,44 @@ def get_edges(ent):
             "cloudServices",
             "nvsFromEdge",
             "vnfs",
-            "certificateSummary"
+            "certificateSummary",
         ],
-        "sortBy": [
-            {
-                "attribute": "edgeState",
-                "type": "ASC"
-            }
-        ],
-        "_filterSpec": True
+        "sortBy": [{"attribute": "edgeState", "type": "ASC"}],
+        "_filterSpec": True,
     }
 
     return api_call(method, params)
 
 
-def get_edge_licenses(ent_id):
+def get_network_license_export() -> dict:
+    """Fetch the network-wide license CSV export from VCO.
 
-    method = "license/getEnterpriseEdgeLicenses"
+    Calls the license/exportNetworkEdgeLicenseData JSON-RPC method to retrieve
+    a CSV string containing all edge license data across the network. The CSV
+    data is available in the response at result.csv.
 
-    params = {
-        "enterpriseId": ent_id
-    }
-
+    Returns:
+        The full parsed JSON-RPC response dict. The CSV string is at
+        response["result"]["csv"]. Returns an empty dict on API error.
+    """
+    method = "license/exportNetworkEdgeLicenseData"
+    params = {"networkId": 1}
     return api_call(method, params)
 
 
-def safe_get(d, *keys):
+def normalize_token(raw_token: str) -> str:
+    """Normalize the VCO API token to ensure it has the required 'Token ' prefix.
 
-    for key in keys:
+    Args:
+        raw_token: The token string from the environment variable. May or may
+            not include the 'Token ' prefix.
 
-        if isinstance(d, dict):
-            d = d.get(key, "")
-        else:
-            return ""
-
-    return d if d is not None else ""
-
-
-def format_date(date_string):
-
-    if not date_string:
-        return ""
-
-    try:
-
-        dt = datetime.strptime(
-            date_string,
-            "%Y-%m-%dT%H:%M:%S.000Z"
-        )
-
-        return dt.strftime("%m/%d/%y")
-
-    except Exception:
-
-        return date_string
-
-
-def clean_vco_url(url):
-
-    url = url.replace("https://", "")
-    url = url.replace("http://", "")
-    url = url.replace("/portal/", "")
-    url = url.replace("/portal", "")
-
-    return url.rstrip("/")
+    Returns:
+        The token string with 'Token ' prefix guaranteed.
+    """
+    if raw_token.startswith("Token "):
+        return raw_token
+    return f"Token {raw_token}"
 
 
 if __name__ == "__main__":
@@ -177,190 +163,120 @@ if __name__ == "__main__":
         print("ERROR: VCO_URL not found in .env")
         exit(1)
 
-    output_rows = []
+    token = normalize_token(token)
+    print(
+        f"Token format: "
+        f"{'provided with prefix' if os.getenv('VCO_TOKEN').startswith('Token ') else 'bare token, prefix auto-added'}"
+    )
 
-    cleaned_vco_url = clean_vco_url(vco_url)
+    try:
+        enterprise_ids = get_enterprise_ids()
+    except VCOAuthError as e:
+        print(f"ERROR: {e}")
+        exit(1)
 
-    enterprise_ids = get_enterprise_ids()
+    if not enterprise_ids:
+        print(
+            "ERROR: No enterprises returned from VCO. "
+            "This usually means the API token is invalid, expired, "
+            "or lacks permissions. Verify VCO_TOKEN in .env."
+        )
+        exit(1)
 
     print(f"Found {len(enterprise_ids)} enterprises")
 
+    # -- License CSV Export --
+    license_export_response = get_network_license_export()
+    csv_string = license_export_response.get("result", {}).get("csv", "")
+
+    if not csv_string:
+        print("WARNING: No license CSV data returned from API")
+        license_df = pd.DataFrame()
+    else:
+        license_df = pd.read_csv(io.StringIO(csv_string))
+
+    print(f"License CSV: {license_df.shape[0]} rows, {license_df.shape[1]} columns")
+    print(f"License CSV columns: {list(license_df.columns)}")
+
+    if license_df.empty:
+        print("WARNING: No license data available. Cannot produce merged output.")
+        exit(0)
+
+    if (
+        "Customer Name" not in license_df.columns
+        or "Edge Name" not in license_df.columns
+    ):
+        print(
+            f"ERROR: License CSV missing required column(s) for merge. "
+            f"Available: {list(license_df.columns)}"
+        )
+        exit(1)
+
+    edge_status_rows = []
 
     for ent in enterprise_ids:
 
-        print(
-            f"\nFetching enterprise details: "
-            f"{ent['name']} (id={ent['id']})"
-        )
-
-        # Enterprise Details
-        ent_details = get_enterprise_details(ent["id"])
-
-        ent_result = ent_details.get("result", {})
-
-        partner_name = safe_get(
-            ent_result,
-            "enterpriseProxy",
-            "name"
-        )
-
-        print(f"Partner Name: {partner_name}")
-
-        # Licenses
-        print("Fetching licenses...")
-
-        license_response = get_edge_licenses(ent["id"])
-
-        licenses = license_response.get("result", [])
-
-        # Build lookup:
-        # license.id -> sku
-        license_lookup = {}
-
-        for lic in licenses:
-
-            lic_id = lic.get("id")
-
-            if lic_id is not None:
-
-                license_lookup[lic_id] = lic.get(
-                    "sku",
-                    ""
-                )
-
-        print(f"Licenses Found: {len(license_lookup)}")
-
-        # Edges
-        print("Fetching edges...")
+        print(f"\nFetching enterprise: {ent['name']} (id={ent['id']})")
 
         edges = get_edges(ent)
 
         edge_data = edges.get("result", {}).get("data", [])
 
-        print(f"Edges Found: {len(edge_data)}")
+        print(f"  Edges Found: {len(edge_data)}")
 
         for edge in edge_data:
-
-            # Match edge.id -> license.id
-            edge_id = edge.get("id")
-
-            edge_license_sku = license_lookup.get(
-                edge_id,
-                ""
+            edge_status_rows.append(
+                {
+                    "Customer Name": ent["name"],
+                    "Edge Name": edge.get("name", ""),
+                    "Edge UUID": edge.get("logicalId", ""),
+                    "Edge Status": edge.get("edgeState", ""),
+                }
             )
 
-            row = {
+    edge_status_df = pd.DataFrame(
+        edge_status_rows,
+        columns=["Customer Name", "Edge Name", "Edge UUID", "Edge Status"],
+    )
+    print(
+        f"Edge status data: {len(edge_status_df)} edges collected across all enterprises"
+    )
 
-                # Extra Fields
-                "Serial Number": edge.get(
-                    "serialNumber",
-                    ""
-                ),
-
-                "Edge Logical ID": edge.get(
-                    "logicalId",
-                    ""
-                ),
-
-                "Edge Status": edge.get(
-                    "edgeState",
-                    ""
-                ),
-
-                # Main Fields
-                "Edge Activation Date": format_date(
-                    edge.get(
-                        "activationTime",
-                        ""
-                    )
-                ),
-
-                "Type": "",
-
-                "Name": edge.get(
-                    "name",
-                    ""
-                ),
-
-                "Description": "",
-
-                # Location
-                "Country": safe_get(
-                    edge,
-                    "site",
-                    "country"
-                ),
-
-                "State": safe_get(
-                    edge,
-                    "site",
-                    "state"
-                ),
-
-                "City": safe_get(
-                    edge,
-                    "site",
-                    "city"
-                ),
-
-                # HA
-                "HA Serial Number": edge.get(
-                    "haSerialNumber",
-                    ""
-                ),
-
-                # Hardware
-                "Model Number": edge.get(
-                    "modelNumber",
-                    ""
-                ),
-
-                # License
-                "License": edge_license_sku,
-
-                "License Set By Maestro": "",
-
-                # VCO
-                "VCO URL": cleaned_vco_url,
-
-                "VCO Enterprise Name": ent["name"],
-
-                # UUID
-                "Customer UUID": ent["logicalId"],
-
-                # Partner
-                "VCO Partner Name": partner_name,
-
-                # Remaining Columns
-                "Last Sync": "",
-                "Ship Date": "",
-                "RMA Date": "",
-                "Shipped Order Number": "",
-                "Configured BW Total MBPS": "",
-                "Bandwidth Over-utilized": "",
-                "License Tier Over-utilized": "",
-                "EFS": "",
-                "Calculated License": ""
-            }
-
-            output_rows.append(row)
-
-    if output_rows:
-
-        df = pd.DataFrame(output_rows)
-
-        # Export XLSX
-        df.to_excel(
-            OUTPUT_XLSX,
-            index=False
-        )
-
+    before_dedup = len(edge_status_df)
+    edge_status_df = edge_status_df.drop_duplicates(
+        subset=["Customer Name", "Edge Name"], keep="first"
+    )
+    dropped_count = before_dedup - len(edge_status_df)
+    if dropped_count > 0:
         print(
-            f"\nDone. "
-            f"{len(output_rows)} edges written to "
-            f"'{OUTPUT_XLSX}'"
+            f"WARNING: {dropped_count} duplicate (Customer Name, Edge Name) "
+            f"pairs removed from edge status data"
         )
 
-    else:
+    merged_df = license_df.merge(
+        edge_status_df[["Customer Name", "Edge Name", "Edge UUID", "Edge Status"]],
+        on=["Customer Name", "Edge Name"],
+        how="left",
+    )
 
-        print("No edge data found.")
+    unmatched_mask = merged_df["Edge Status"].isna()
+    unmatched_count = unmatched_mask.sum()
+    matched_count = len(merged_df) - unmatched_count
+
+    if unmatched_count > 0:
+        print(f"WARNING: {unmatched_count} license rows have no matching edge status:")
+        for _, row in merged_df[unmatched_mask].head(20).iterrows():
+            print(
+                f"  Customer Name: {row['Customer Name']}, Edge Name: {row['Edge Name']}"
+            )
+        if unmatched_count > 20:
+            print(f"  ... and {unmatched_count - 20} more")
+
+    merged_df["Edge UUID"] = merged_df["Edge UUID"].fillna("")
+    merged_df["Edge Status"] = merged_df["Edge Status"].fillna("")
+
+    merged_df.to_csv(OUTPUT_CSV, index=False, encoding="utf-8-sig")
+    print(
+        f"Done. {len(merged_df)} rows written to '{OUTPUT_CSV}' "
+        f"({matched_count} matched, {unmatched_count} unmatched)"
+    )
