@@ -54,27 +54,27 @@ Requirements for milestone v1.1: 95th Percentile Utilization Metrics.
 
 | Requirement | Phase | Status |
 |-------------|-------|--------|
-| CLI-01 | TBD | Pending |
-| CLI-02 | TBD | Pending |
-| CLI-03 | TBD | Pending |
-| CLI-04 | TBD | Pending |
-| METR-01 | TBD | Pending |
-| METR-02 | TBD | Pending |
-| METR-03 | TBD | Pending |
-| METR-04 | TBD | Pending |
-| CALC-01 | TBD | Pending |
-| CALC-02 | TBD | Pending |
-| CALC-03 | TBD | Pending |
-| OUT-01 | TBD | Pending |
-| OUT-02 | TBD | Pending |
-| OUT-03 | TBD | Pending |
-| OUT-04 | TBD | Pending |
+| CLI-01 | Phase 3 | Pending |
+| CLI-02 | Phase 3 | Pending |
+| CLI-03 | Phase 3 | Pending |
+| CLI-04 | Phase 3 | Pending |
+| METR-01 | Phase 4 | Pending |
+| METR-02 | Phase 4 | Pending |
+| METR-03 | Phase 4 | Pending |
+| METR-04 | Phase 4 | Pending |
+| CALC-01 | Phase 4 | Pending |
+| CALC-02 | Phase 4 | Pending |
+| CALC-03 | Phase 4 | Pending |
+| OUT-01 | Phase 5 | Pending |
+| OUT-02 | Phase 5 | Pending |
+| OUT-03 | Phase 5 | Pending |
+| OUT-04 | Phase 5 | Pending |
 
 **Coverage:**
 - v1.1 requirements: 15 total
-- Mapped to phases: 0
-- Unmapped: 15
+- Mapped to phases: 15
+- Unmapped: 0
 
 ---
 *Requirements defined: 2026-08-05*
-*Last updated: 2026-08-05 after initial definition*
+*Last updated: 2026-08-05 — Phase assignments added (v1.1 roadmap)*
