@@ -34,7 +34,9 @@
   2. User can run `vco_edge_export.py --months 3` to specify N months; omitting the flag defaults to 1 month
   3. Running without `--collect_95th` produces identical CSV output to existing v1.0 behavior
   4. Running with `--help` displays the new flags with descriptions
-**Plans**: TBD
+**Plans:** 1 plan
+Plans:
+- [ ] 03-01-PLAN.md — Add argparse CLI with --collect_95th and --months flags, plus automated tests
 
 ### Phase 4: Metrics Collection & Calculation
 **Goal**: Per-edge 95th percentile bandwidth values (tx, rx, total) are accurately computed from VCO API data
@@ -65,6 +67,6 @@
 |-------|-----------|----------------|--------|-----------|
 | 1. Data Acquisition | v1.0 | 1/1 | Complete | 2026-07-28 |
 | 2. Merge and Output | v1.0 | 1/1 | Complete | 2026-07-28 |
-| 3. CLI & Configuration | v1.1 | 0/? | Not started | - |
+| 3. CLI & Configuration | v1.1 | 0/1 | Not started | - |
 | 4. Metrics Collection & Calculation | v1.1 | 0/? | Not started | - |
 | 5. Output & Packaging | v1.1 | 0/? | Not started | - |
