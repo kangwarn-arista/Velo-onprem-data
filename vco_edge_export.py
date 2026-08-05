@@ -1,5 +1,7 @@
+import argparse
 import io
 import json
+import logging
 import time
 import urllib3
 import requests
@@ -150,7 +152,33 @@ def normalize_token(raw_token: str) -> str:
     return f"Token {raw_token}"
 
 
+def build_parser() -> argparse.ArgumentParser:
+    """Build CLI argument parser for VCO edge export.
+
+    Returns:
+        argparse.ArgumentParser: Configured parser with --collect_95th and --months flags.
+    """
+    parser = argparse.ArgumentParser(
+        description="Export VCO edge and license data, with optional 95th percentile bandwidth metrics."
+    )
+    parser.add_argument(
+        "--collect_95th",
+        action="store_true",
+        default=False,
+        help="Enable 95th percentile bandwidth metrics collection per edge link.",
+    )
+    parser.add_argument(
+        "--months",
+        type=int,
+        default=1,
+        help="Number of complete months to collect for 95th percentile metrics (used with --collect_95th).",
+    )
+    return parser
+
+
 if __name__ == "__main__":
+
+    args = build_parser().parse_args()
 
     # Validate .env variables
     if not token:
@@ -168,6 +196,15 @@ if __name__ == "__main__":
         f"Token format: "
         f"{'provided with prefix' if os.getenv('VCO_TOKEN').startswith('Token ') else 'bare token, prefix auto-added'}"
     )
+
+    if args.months < 1:
+        logging.error("--months must be >= 1, got %d", args.months)
+        exit(1)
+
+    if args.collect_95th:
+        logging.info("95th percentile collection enabled for %d month(s).", args.months)
+    else:
+        logging.info("95th percentile collection disabled — standard edge export mode.")
 
     try:
         enterprise_ids = get_enterprise_ids()
