@@ -55,11 +55,11 @@ Plans:
   4. Daily 95th percentile is the value at ceil(count * 0.95) in the sorted sample list, computed independently for tx, rx, and total
   5. Monthly 95th percentile is derived from daily values using the same ceil(count * 0.95) logic, accounting for variable days per month (28-31)
 
-**Plans:** 2 plans
+**Plans:** 1/2 plans executed
 Plans:
 **Wave 1**
 
-- [ ] 04-01-PLAN.md — Metrics computation module (TDD): month ranges, bytes-to-Mbps, percentile, link aggregation, edge-month pipeline
+- [x] 04-01-PLAN.md — Metrics computation module (TDD): month ranges, bytes-to-Mbps, percentile, link aggregation, edge-month pipeline
 
 **Wave 2** *(blocked on Wave 1 completion)*
 
@@ -86,5 +86,5 @@ Plans:
 | 1. Data Acquisition | v1.0 | 1/1 | Complete | 2026-07-28 |
 | 2. Merge and Output | v1.0 | 1/1 | Complete | 2026-07-28 |
 | 3. CLI & Configuration | v1.1 | 1/1 | Complete   | 2026-08-06 |
-| 4. Metrics Collection & Calculation | v1.1 | 0/2 | Planned | - |
+| 4. Metrics Collection & Calculation | v1.1 | 1/2 | In Progress|  |
 | 5. Output & Packaging | v1.1 | 0/? | Not started | - |
