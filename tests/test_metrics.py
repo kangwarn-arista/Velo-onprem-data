@@ -27,15 +27,15 @@ class TestGetTargetMonths:
     def test_single_month_start_ms_is_utc_epoch_millis(self):
         """start_ms for July 2026 is 2026-07-01T00:00:00 UTC in milliseconds."""
         result = get_target_months(1, date(2026, 8, 5))
-        # 2026-07-01T00:00:00 UTC = 1782950400 seconds
-        expected_start_ms = 1782950400 * 1000
+        # 2026-07-01T00:00:00 UTC = 1782864000 seconds
+        expected_start_ms = 1782864000 * 1000
         assert result[0]["start_ms"] == expected_start_ms
 
     def test_single_month_end_ms_is_next_month_start(self):
         """end_ms for July 2026 is 2026-08-01T00:00:00 UTC in milliseconds."""
         result = get_target_months(1, date(2026, 8, 5))
-        # 2026-08-01T00:00:00 UTC = 1785628800 seconds
-        expected_end_ms = 1785628800 * 1000
+        # 2026-08-01T00:00:00 UTC = 1785542400 seconds
+        expected_end_ms = 1785542400 * 1000
         assert result[0]["end_ms"] == expected_end_ms
 
     def test_three_months_chronological_order(self):
