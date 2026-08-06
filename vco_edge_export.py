@@ -11,6 +11,8 @@ from dotenv import load_dotenv
 from requests.structures import CaseInsensitiveDict
 import os
 
+from metrics import get_target_months, compute_edge_month_metrics
+
 urllib3.disable_warnings(urllib3.exceptions.InsecureRequestWarning)
 requests.packages.urllib3.disable_warnings()
 
@@ -140,6 +142,33 @@ def get_network_license_export() -> dict:
     return api_call(method, params)
 
 
+def get_edge_link_series(enterprise_id: int, edge_id: int, start_ms: int, end_ms: int) -> dict:
+    """Fetch per-edge link bandwidth time-series data from VCO.
+
+    Calls the metrics/getEdgeLinkSeries JSON-RPC method to retrieve
+    bytesTx and bytesRx samples for all links on a given edge within
+    the specified time interval.
+
+    Args:
+        enterprise_id: The VCO enterprise ID that owns the edge.
+        edge_id: The numeric edge ID (the ``id`` field, not ``logicalId``).
+        start_ms: Interval start timestamp in UTC milliseconds since epoch.
+        end_ms: Interval end timestamp in UTC milliseconds since epoch.
+
+    Returns:
+        The full parsed JSON-RPC response dict. The link series data is at
+        response["result"]. Returns an empty dict on API error.
+    """
+    method = "metrics/getEdgeLinkSeries"
+    params = {
+        "enterpriseId": enterprise_id,
+        "edgeId": edge_id,
+        "interval": {"start": start_ms, "end": end_ms},
+        "metrics": ["bytesTx", "bytesRx"],
+    }
+    return api_call(method, params)
+
+
 def normalize_token(raw_token: str) -> str:
     """Normalize the VCO API token to ensure it has the required 'Token ' prefix.
 
@@ -257,6 +286,7 @@ if __name__ == "__main__":
         exit(1)
 
     edge_status_rows = []
+    edge_info_list = []
 
     for ent in enterprise_ids:
 
@@ -277,6 +307,15 @@ if __name__ == "__main__":
                     "Edge Status": edge.get("edgeState", ""),
                 }
             )
+            if args.collect_95th:
+                edge_info_list.append(
+                    {
+                        "enterprise_id": ent["id"],
+                        "enterprise_name": ent["name"],
+                        "edge_id": edge.get("id"),
+                        "edge_name": edge.get("name", ""),
+                    }
+                )
 
     edge_status_df = pd.DataFrame(
         edge_status_rows,
@@ -324,3 +363,43 @@ if __name__ == "__main__":
         f"Done. {len(merged_df)} rows written to '{OUTPUT_CSV}' "
         f"({matched_count} matched, {unmatched_count} unmatched)"
     )
+
+    if args.collect_95th:
+        target_months = get_target_months(args.months)
+        print(
+            f"\nCollecting 95th percentile metrics for {len(target_months)} month(s): "
+            f"{', '.join(m['label'] for m in target_months)}"
+        )
+        metrics_results = []
+        for edge_info in edge_info_list:
+            print(
+                f"\n  Processing edge: {edge_info['edge_name']} "
+                f"({edge_info['enterprise_name']})"
+            )
+            for month in target_months:
+                response = get_edge_link_series(
+                    edge_info["enterprise_id"],
+                    edge_info["edge_id"],
+                    month["start_ms"],
+                    month["end_ms"],
+                )
+                link_series = response.get("result", [])
+                metrics = compute_edge_month_metrics(link_series, month["start_ms"])
+                metrics_results.append(
+                    {
+                        "enterprise_name": edge_info["enterprise_name"],
+                        "edge_name": edge_info["edge_name"],
+                        "month_label": month["label"],
+                        **metrics,
+                    }
+                )
+                print(
+                    f"    {month['label']}: "
+                    f"tx={metrics['monthly_tx_95th_mbps']:.4f} "
+                    f"rx={metrics['monthly_rx_95th_mbps']:.4f} "
+                    f"total={metrics['monthly_total_95th_mbps']:.4f} Mbps"
+                )
+        print(
+            f"\n95th percentile collection complete: "
+            f"{len(metrics_results)} edge-month records computed"
+        )
