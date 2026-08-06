@@ -1,13 +1,20 @@
 """Tests for metrics.py pure computation functions.
 
-Covers: get_target_months, bytes_to_mbps, percentile_95.
+Covers: get_target_months, bytes_to_mbps, percentile_95,
+aggregate_link_samples, compute_edge_month_metrics.
 No VCO credentials needed -- metrics.py uses only stdlib.
 """
-from datetime import date
+from datetime import date, datetime, timezone
 
 import pytest
 
-from metrics import bytes_to_mbps, get_target_months, percentile_95
+from metrics import (
+    aggregate_link_samples,
+    bytes_to_mbps,
+    compute_edge_month_metrics,
+    get_target_months,
+    percentile_95,
+)
 
 
 # ── get_target_months ──────────────────────────────────────────────────────
@@ -125,3 +132,120 @@ class TestPercentile95:
         """percentile_95([]) raises ValueError."""
         with pytest.raises(ValueError, match="empty"):
             percentile_95([])
+
+
+# ── aggregate_link_samples ─────────────────────────────────────────────────
+
+
+class TestAggregateLinkSamples:
+    """Tests for cross-link sample aggregation."""
+
+    def test_single_link_single_sample(self):
+        """Single link with one sample returns one aggregated entry."""
+        links = [{"series": [{"bytesTx": 100, "bytesRx": 200}]}]
+        result = aggregate_link_samples(links)
+        assert result == [{"tx_bytes": 100, "rx_bytes": 200}]
+
+    def test_two_links_sums_at_each_index(self):
+        """Two links sum bytesTx and bytesRx at each sample index."""
+        links = [
+            {"series": [{"bytesTx": 100, "bytesRx": 200}]},
+            {"series": [{"bytesTx": 50, "bytesRx": 60}]},
+        ]
+        result = aggregate_link_samples(links)
+        assert result == [{"tx_bytes": 150, "rx_bytes": 260}]
+
+    def test_empty_list(self):
+        """Empty link list returns empty list."""
+        assert aggregate_link_samples([]) == []
+
+    def test_link_with_empty_series(self):
+        """Link whose series is empty returns empty list."""
+        assert aggregate_link_samples([{"series": []}]) == []
+
+    def test_missing_bytes_keys_default_to_zero(self):
+        """Missing bytesTx/bytesRx keys default to 0."""
+        links = [{"series": [{"bytesTx": 100}]}]
+        result = aggregate_link_samples(links)
+        assert result == [{"tx_bytes": 100, "rx_bytes": 0}]
+
+    def test_missing_series_key(self):
+        """Link dict without 'series' key treated as empty series."""
+        links = [{"other": "data"}]
+        result = aggregate_link_samples(links)
+        assert result == []
+
+    def test_multiple_samples_multiple_links(self):
+        """Two links with 2 samples each aggregate correctly."""
+        links = [
+            {"series": [{"bytesTx": 10, "bytesRx": 20}, {"bytesTx": 30, "bytesRx": 40}]},
+            {"series": [{"bytesTx": 5, "bytesRx": 6}, {"bytesTx": 7, "bytesRx": 8}]},
+        ]
+        result = aggregate_link_samples(links)
+        assert result == [
+            {"tx_bytes": 15, "rx_bytes": 26},
+            {"tx_bytes": 37, "rx_bytes": 48},
+        ]
+
+
+# ── compute_edge_month_metrics ─────────────────────────────────────────────
+
+
+class TestComputeEdgeMonthMetrics:
+    """Tests for the full edge-month metrics pipeline."""
+
+    # 2026-07-01T00:00:00 UTC in milliseconds
+    JULY_START_MS = int(datetime(2026, 7, 1, tzinfo=timezone.utc).timestamp() * 1000)
+
+    def test_empty_link_series_returns_zeros(self):
+        """Empty link_series_result returns all-zero metrics dict."""
+        result = compute_edge_month_metrics([], 0)
+        assert result == {
+            "monthly_tx_95th_mbps": 0.0,
+            "monthly_rx_95th_mbps": 0.0,
+            "monthly_total_95th_mbps": 0.0,
+        }
+
+    def test_uniform_data_288_samples(self):
+        """288 identical samples (1 day) with known byte values."""
+        # 288 samples = 1 full day of 5-minute intervals
+        links = [
+            {"series": [{"bytesTx": 1_048_576, "bytesRx": 2_097_152}] * 288}
+        ]
+        result = compute_edge_month_metrics(links, self.JULY_START_MS)
+        # All samples identical -> p95 of identical values = that value
+        assert result["monthly_tx_95th_mbps"] == pytest.approx(8 / 300)
+        assert result["monthly_rx_95th_mbps"] == pytest.approx(16 / 300)
+        assert result["monthly_total_95th_mbps"] == pytest.approx(24 / 300)
+
+    def test_total_is_from_raw_bytes_not_sum_of_converted(self):
+        """total_mbps is bytes_to_mbps(tx_bytes + rx_bytes), not tx_mbps + rx_mbps."""
+        # With single sample, result should be bytes_to_mbps(tx + rx)
+        links = [{"series": [{"bytesTx": 1_048_576, "bytesRx": 2_097_152}]}]
+        result = compute_edge_month_metrics(links, self.JULY_START_MS)
+        # bytes_to_mbps(1_048_576 + 2_097_152) = bytes_to_mbps(3_145_728)
+        expected_total = 3_145_728 * 8 / 1_048_576 / 300
+        assert result["monthly_total_95th_mbps"] == pytest.approx(expected_total)
+
+    def test_result_has_three_keys(self):
+        """Result dict has exactly the three expected metric keys."""
+        links = [{"series": [{"bytesTx": 100, "bytesRx": 200}]}]
+        result = compute_edge_month_metrics(links, self.JULY_START_MS)
+        assert set(result.keys()) == {
+            "monthly_tx_95th_mbps",
+            "monthly_rx_95th_mbps",
+            "monthly_total_95th_mbps",
+        }
+
+    def test_multi_day_grouping(self):
+        """Samples spanning 2 days produce daily p95 values then monthly p95."""
+        # 576 samples = 2 full days
+        # Day 1: 288 samples at 1_048_576 tx bytes -> tx_mbps = 8/300
+        # Day 2: 288 samples at 2_097_152 tx bytes -> tx_mbps = 16/300
+        day1 = [{"bytesTx": 1_048_576, "bytesRx": 0}] * 288
+        day2 = [{"bytesTx": 2_097_152, "bytesRx": 0}] * 288
+        links = [{"series": day1 + day2}]
+        result = compute_edge_month_metrics(links, self.JULY_START_MS)
+        # Day 1 p95 = 8/300 (all identical), Day 2 p95 = 16/300 (all identical)
+        # Monthly p95 of [8/300, 16/300] -> ceil(2 * 0.95) = 2 -> second value = 16/300
+        assert result["monthly_tx_95th_mbps"] == pytest.approx(16 / 300)
