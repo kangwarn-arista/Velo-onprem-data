@@ -33,7 +33,7 @@ class VCOAuthError(Exception):
 def api_call(method, params, max_retries=5):
     headers = CaseInsensitiveDict()
     headers["Authorization"] = token
-    headers["Content-Type"] = "application/x-www-form-urlencoded"
+    headers["Content-Type"] = "application/json"
 
     data = {"id": 0, "jsonrpc": "2.0", "method": method, "params": params}
 
@@ -50,7 +50,10 @@ def api_call(method, params, max_retries=5):
                 )
 
             if resp.status_code == 429:
-                retry_after = int(resp.headers.get("Retry-After", 2 ** attempt))
+                try:
+                    retry_after = int(resp.headers.get("Retry-After", 2 ** attempt))
+                except (ValueError, TypeError):
+                    retry_after = 2 ** attempt
                 print(f"  Rate limited (429) on {method}, retrying in {retry_after}s (attempt {attempt + 1}/{max_retries})")
                 time.sleep(retry_after)
                 continue
@@ -147,6 +150,8 @@ def normalize_token(raw_token: str) -> str:
     Returns:
         The token string with 'Token ' prefix guaranteed.
     """
+    if not raw_token:
+        raise ValueError("raw_token must be a non-empty string")
     if raw_token.startswith("Token "):
         return raw_token
     return f"Token {raw_token}"
@@ -177,6 +182,8 @@ def build_parser() -> argparse.ArgumentParser:
 
 
 if __name__ == "__main__":
+
+    logging.basicConfig(level=logging.INFO, format="%(levelname)s: %(message)s")
 
     args = build_parser().parse_args()
 
@@ -224,7 +231,7 @@ if __name__ == "__main__":
 
     # -- License CSV Export --
     license_export_response = get_network_license_export()
-    csv_string = license_export_response.get("result", {}).get("csv", "")
+    csv_string = (license_export_response.get("result") or {}).get("csv", "")
 
     if not csv_string:
         print("WARNING: No license CSV data returned from API")
@@ -257,7 +264,7 @@ if __name__ == "__main__":
 
         edges = get_edges(ent)
 
-        edge_data = edges.get("result", {}).get("data", [])
+        edge_data = (edges.get("result") or {}).get("data", [])
 
         print(f"  Edges Found: {len(edge_data)}")
 
