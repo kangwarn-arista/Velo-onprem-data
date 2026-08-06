@@ -1,16 +1,15 @@
 """CLI argument parsing tests for vco_edge_export.build_parser.
 
-Sets dummy VCO_TOKEN and VCO_URL environment variables before importing
+Overwrites VCO_TOKEN and VCO_URL environment variables before importing
 vco_edge_export so the module-level load_dotenv() and os.getenv() calls
-do not require real credentials.
+never use real credentials.
 """
-import argparse
 import os
 
 import pytest
 
-os.environ.setdefault("VCO_TOKEN", "Token test")
-os.environ.setdefault("VCO_URL", "https://test.example.com/portal/")
+os.environ["VCO_TOKEN"] = "Token test"
+os.environ["VCO_URL"] = "https://test.example.com/portal/"
 
 from vco_edge_export import build_parser  # noqa: E402
 
