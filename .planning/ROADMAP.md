@@ -20,7 +20,7 @@
 **Milestone Goal:** Add optional per-edge 95th percentile bandwidth metrics across configurable month ranges, output as per-month CSVs in a timestamped zip archive.
 
 - [x] **Phase 3: CLI & Configuration** - Argparse flags for `--collect_95th` and `--months N` without breaking existing behavior (completed 2026-08-06)
-- [ ] **Phase 4: Metrics Collection & Calculation** - Fetch per-edge link series from VCO API and compute 95th percentile tx/rx/total values
+- [x] **Phase 4: Metrics Collection & Calculation** - Fetch per-edge link series from VCO API and compute 95th percentile tx/rx/total values (completed 2026-08-06)
 - [ ] **Phase 5: Output & Packaging** - Write per-month CSVs and compress into a timestamped zip archive
 
 ## Phase Details
@@ -55,7 +55,7 @@ Plans:
   4. Daily 95th percentile is the value at ceil(count * 0.95) in the sorted sample list, computed independently for tx, rx, and total
   5. Monthly 95th percentile is derived from daily values using the same ceil(count * 0.95) logic, accounting for variable days per month (28-31)
 
-**Plans:** 1/2 plans executed
+**Plans:** 2/2 plans complete
 Plans:
 **Wave 1**
 
@@ -63,7 +63,7 @@ Plans:
 
 **Wave 2** *(blocked on Wave 1 completion)*
 
-- [ ] 04-02-PLAN.md — API integration: getEdgeLinkSeries wrapper and metrics collection orchestration in __main__
+- [x] 04-02-PLAN.md — API integration: getEdgeLinkSeries wrapper and metrics collection orchestration in __main__
 
 ### Phase 5: Output & Packaging
 
@@ -86,5 +86,5 @@ Plans:
 | 1. Data Acquisition | v1.0 | 1/1 | Complete | 2026-07-28 |
 | 2. Merge and Output | v1.0 | 1/1 | Complete | 2026-07-28 |
 | 3. CLI & Configuration | v1.1 | 1/1 | Complete   | 2026-08-06 |
-| 4. Metrics Collection & Calculation | v1.1 | 1/2 | In Progress|  |
+| 4. Metrics Collection & Calculation | v1.1 | 2/2 | Complete   | 2026-08-06 |
 | 5. Output & Packaging | v1.1 | 0/? | Not started | - |
