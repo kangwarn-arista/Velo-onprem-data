@@ -1,17 +1,11 @@
 """CLI argument parsing tests for vco_edge_export.build_parser.
 
-Overwrites VCO_TOKEN and VCO_URL environment variables before importing
-vco_edge_export so the module-level load_dotenv() and os.getenv() calls
-never use real credentials.
+VCO_TOKEN and VCO_URL are set by conftest.py before this module is imported,
+so vco_edge_export's module-level os.getenv() calls use test credentials.
 """
-import os
-
 import pytest
 
-os.environ["VCO_TOKEN"] = "Token test"
-os.environ["VCO_URL"] = "https://test.example.com/portal/"
-
-from vco_edge_export import build_parser  # noqa: E402
+from vco_edge_export import build_parser
 
 
 def test_default_values():
