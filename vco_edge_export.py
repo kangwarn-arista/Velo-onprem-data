@@ -14,7 +14,6 @@ import os
 from metrics import get_target_months, compute_edge_month_metrics
 
 urllib3.disable_warnings(urllib3.exceptions.InsecureRequestWarning)
-requests.packages.urllib3.disable_warnings()
 
 # Load .env file
 load_dotenv()
