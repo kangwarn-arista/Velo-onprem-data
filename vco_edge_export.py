@@ -386,28 +386,39 @@ if __name__ == "__main__":
                 f"({edge_info['enterprise_name']})"
             )
             for month in target_months:
-                response = get_edge_link_series(
-                    edge_info["enterprise_id"],
-                    edge_info["edge_id"],
-                    month["start_ms"],
-                    month["end_ms"],
-                )
-                link_series = response.get("result", [])
-                metrics = compute_edge_month_metrics(link_series, month["start_ms"])
-                metrics_results.append(
-                    {
-                        "enterprise_name": edge_info["enterprise_name"],
-                        "edge_name": edge_info["edge_name"],
-                        "month_label": month["label"],
-                        **metrics,
-                    }
-                )
-                print(
-                    f"    {month['label']}: "
-                    f"tx={metrics['monthly_tx_95th_mbps']:.4f} "
-                    f"rx={metrics['monthly_rx_95th_mbps']:.4f} "
-                    f"total={metrics['monthly_total_95th_mbps']:.4f} Mbps"
-                )
+                try:
+                    response = get_edge_link_series(
+                        edge_info["enterprise_id"],
+                        edge_info["edge_id"],
+                        month["start_ms"],
+                        month["end_ms"],
+                    )
+                    link_series = response.get("result", [])
+                    metrics = compute_edge_month_metrics(link_series, month["start_ms"])
+                    metrics_results.append(
+                        {
+                            "enterprise_name": edge_info["enterprise_name"],
+                            "edge_name": edge_info["edge_name"],
+                            "month_label": month["label"],
+                            **metrics,
+                        }
+                    )
+                    print(
+                        f"    {month['label']}: "
+                        f"tx={metrics['monthly_tx_95th_mbps']:.4f} "
+                        f"rx={metrics['monthly_rx_95th_mbps']:.4f} "
+                        f"total={metrics['monthly_total_95th_mbps']:.4f} Mbps"
+                    )
+                except VCOAuthError:
+                    raise  # Auth failures should still terminate
+                except Exception as e:
+                    logging.warning(
+                        "Failed to collect metrics for edge %s (%s) month %s: %s",
+                        edge_info["edge_name"],
+                        edge_info["enterprise_name"],
+                        month["label"],
+                        e,
+                    )
         print(
             f"\n95th percentile collection complete: "
             f"{len(metrics_results)} edge-month records computed"
