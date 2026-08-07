@@ -29,6 +29,9 @@ def get_target_months(
         ``start_ms``, ``end_ms``, and ``label``.  Timestamps are UTC
         milliseconds since epoch.
     """
+    if num_months < 1:
+        raise ValueError(f"num_months must be >= 1, got {num_months}")
+
     if reference_date is None:
         reference_date = date.today()
 
