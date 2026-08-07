@@ -242,8 +242,8 @@ if __name__ == "__main__":
         f"{'provided with prefix' if os.getenv('VCO_TOKEN').startswith('Token ') else 'bare token, prefix auto-added'}"
     )
 
-    if args.months < 1:
-        logging.error("--months must be >= 1, got %d", args.months)
+    if args.months < 1 or args.months > 12:
+        logging.error("--months must be between 1 and 12, got %d", args.months)
         exit(1)
 
     if args.collect_95th:
