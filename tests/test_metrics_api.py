@@ -4,16 +4,12 @@ Verifies that the wrapper calls api_call with the correct JSON-RPC method
 and parameter structure matching the VCO metrics/getEdgeLinkSeries contract
 (METR-01).
 
-Sets VCO_TOKEN and VCO_URL before importing vco_edge_export to avoid
-loading real credentials from .env.
+VCO_TOKEN and VCO_URL are set by conftest.py before this module is imported,
+so vco_edge_export's module-level os.getenv() calls use test credentials.
 """
-import os
 from unittest.mock import patch
 
-os.environ["VCO_TOKEN"] = "Token test"
-os.environ["VCO_URL"] = "https://test.example.com/portal/"
-
-from vco_edge_export import get_edge_link_series  # noqa: E402
+from vco_edge_export import get_edge_link_series
 
 
 def test_get_edge_link_series_params():
