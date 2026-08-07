@@ -120,7 +120,7 @@ def aggregate_link_samples(link_series_result: list[dict]) -> list[dict]:
         List of dicts with keys ``tx_bytes`` and ``rx_bytes``, one per
         sample index.  Returns an empty list when no series data exists.
     """
-    all_series = [link.get("series", []) for link in link_series_result]
+    all_series = [link.get("series") or [] for link in link_series_result]
     if not all_series:
         return []
 
