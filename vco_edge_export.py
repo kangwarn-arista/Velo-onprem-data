@@ -66,11 +66,20 @@ def api_call(method, params, max_retries=5):
             if "error" in result:
                 error_msg = result["error"]
                 if isinstance(error_msg, dict):
+                    error_code = error_msg.get("code", 0)
                     error_msg = error_msg.get("message", str(error_msg))
-                raise VCOAuthError(
-                    f"VCO API rejected request to '{method}': {error_msg}. "
-                    f"This typically indicates an invalid or expired token."
-                )
+                else:
+                    error_code = 0
+                # Only raise VCOAuthError for known auth error patterns
+                auth_keywords = ["authentication", "unauthorized", "token", "permission"]
+                if any(kw in str(error_msg).lower() for kw in auth_keywords):
+                    raise VCOAuthError(
+                        f"VCO API rejected request to '{method}': {error_msg}. "
+                        f"This typically indicates an invalid or expired token."
+                    )
+                # For non-auth JSON-RPC errors, log and return empty dict
+                print(f"API Error on '{method}': {error_msg}")
+                return {}
 
             return result
 
