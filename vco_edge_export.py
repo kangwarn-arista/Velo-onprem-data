@@ -317,14 +317,21 @@ if __name__ == "__main__":
                 }
             )
             if args.collect_95th:
-                edge_info_list.append(
-                    {
-                        "enterprise_id": ent["id"],
-                        "enterprise_name": ent["name"],
-                        "edge_id": edge.get("id"),
-                        "edge_name": edge.get("name", ""),
-                    }
-                )
+                edge_id = edge.get("id")
+                if edge_id is not None:
+                    edge_info_list.append(
+                        {
+                            "enterprise_id": ent["id"],
+                            "enterprise_name": ent["name"],
+                            "edge_id": edge_id,
+                            "edge_name": edge.get("name", ""),
+                        }
+                    )
+                else:
+                    logging.warning(
+                        "Edge '%s' has no numeric id -- skipping metrics",
+                        edge.get("name", "unknown"),
+                    )
 
     edge_status_df = pd.DataFrame(
         edge_status_rows,
