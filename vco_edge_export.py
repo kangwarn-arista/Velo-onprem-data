@@ -400,7 +400,7 @@ if __name__ == "__main__":
                         month["start_ms"],
                         month["end_ms"],
                     )
-                    link_series = response.get("result", [])
+                    link_series = response.get("result") or []
                     metrics = compute_edge_month_metrics(link_series, month["start_ms"])
                     metrics_results.append(
                         {
