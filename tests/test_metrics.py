@@ -204,6 +204,12 @@ class TestComputeEdgeMonthMetrics:
             "monthly_tx_95th_mbps": 0.0,
             "monthly_rx_95th_mbps": 0.0,
             "monthly_total_95th_mbps": 0.0,
+            "monthly_tx_max_mbps": 0.0,
+            "monthly_rx_max_mbps": 0.0,
+            "monthly_total_max_mbps": 0.0,
+            "monthly_tx_avg_mbps": 0.0,
+            "monthly_rx_avg_mbps": 0.0,
+            "monthly_total_avg_mbps": 0.0,
         }
 
     def test_uniform_data_288_samples(self):
@@ -213,10 +219,16 @@ class TestComputeEdgeMonthMetrics:
             {"series": [{"bytesTx": 1_048_576, "bytesRx": 2_097_152}] * 288}
         ]
         result = compute_edge_month_metrics(links, self.JULY_START_MS)
-        # All samples identical -> p95 of identical values = that value
+        # All samples identical -> p95/max/avg of identical values = that value
         assert result["monthly_tx_95th_mbps"] == pytest.approx(8 / 300)
         assert result["monthly_rx_95th_mbps"] == pytest.approx(16 / 300)
         assert result["monthly_total_95th_mbps"] == pytest.approx(24 / 300)
+        assert result["monthly_tx_max_mbps"] == pytest.approx(8 / 300)
+        assert result["monthly_rx_max_mbps"] == pytest.approx(16 / 300)
+        assert result["monthly_total_max_mbps"] == pytest.approx(24 / 300)
+        assert result["monthly_tx_avg_mbps"] == pytest.approx(8 / 300)
+        assert result["monthly_rx_avg_mbps"] == pytest.approx(16 / 300)
+        assert result["monthly_total_avg_mbps"] == pytest.approx(24 / 300)
 
     def test_total_is_from_raw_bytes_not_sum_of_converted(self):
         """total_mbps is bytes_to_mbps(tx_bytes + rx_bytes), not tx_mbps + rx_mbps."""
@@ -227,18 +239,24 @@ class TestComputeEdgeMonthMetrics:
         expected_total = 3_145_728 * 8 / 1_048_576 / 300
         assert result["monthly_total_95th_mbps"] == pytest.approx(expected_total)
 
-    def test_result_has_three_keys(self):
-        """Result dict has exactly the three expected metric keys."""
+    def test_result_has_nine_keys(self):
+        """Result dict has exactly the nine expected metric keys."""
         links = [{"series": [{"bytesTx": 100, "bytesRx": 200}]}]
         result = compute_edge_month_metrics(links, self.JULY_START_MS)
         assert set(result.keys()) == {
             "monthly_tx_95th_mbps",
             "monthly_rx_95th_mbps",
             "monthly_total_95th_mbps",
+            "monthly_tx_max_mbps",
+            "monthly_rx_max_mbps",
+            "monthly_total_max_mbps",
+            "monthly_tx_avg_mbps",
+            "monthly_rx_avg_mbps",
+            "monthly_total_avg_mbps",
         }
 
     def test_multi_day_grouping(self):
-        """Samples spanning 2 days produce daily p95 values then monthly p95."""
+        """Samples spanning 2 days produce daily p95 values then monthly p95/max/avg."""
         # 576 samples = 2 full days
         # Day 1: 288 samples at 1_048_576 tx bytes -> tx_mbps = 8/300
         # Day 2: 288 samples at 2_097_152 tx bytes -> tx_mbps = 16/300
@@ -249,3 +267,12 @@ class TestComputeEdgeMonthMetrics:
         # Day 1 p95 = 8/300 (all identical), Day 2 p95 = 16/300 (all identical)
         # Monthly p95 of [8/300, 16/300] -> ceil(2 * 0.95) = 2 -> second value = 16/300
         assert result["monthly_tx_95th_mbps"] == pytest.approx(16 / 300)
+        # max of [8/300, 16/300] = 16/300
+        assert result["monthly_tx_max_mbps"] == pytest.approx(16 / 300)
+        # avg of [8/300, 16/300] = (8/300 + 16/300) / 2 = 12/300
+        assert result["monthly_tx_avg_mbps"] == pytest.approx(12 / 300)
+        # rx bytes are 0 -> all rx and total metrics reflect that
+        assert result["monthly_rx_max_mbps"] == 0.0
+        assert result["monthly_rx_avg_mbps"] == 0.0
+        assert result["monthly_total_max_mbps"] == pytest.approx(16 / 300)
+        assert result["monthly_total_avg_mbps"] == pytest.approx(12 / 300)
