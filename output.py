@@ -29,6 +29,11 @@ def extract_vco_name(vco_url: str) -> str:
         ``"vco.example.com"``.
     """
     parsed = urlparse(vco_url)
+    if not parsed.hostname:
+        raise ValueError(
+            f"Cannot extract hostname from VCO URL {vco_url!r}. "
+            "Ensure VCO_URL includes a scheme (e.g. 'https://vco.example.com/portal/')."
+        )
     return parsed.hostname
 
 
