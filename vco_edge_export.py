@@ -2,7 +2,10 @@ import argparse
 import io
 import json
 import logging
+import shutil
+import tempfile
 import time
+from datetime import datetime
 import urllib3
 import requests
 import pandas as pd
@@ -12,6 +15,7 @@ from requests.structures import CaseInsensitiveDict
 import os
 
 from metrics import get_target_months, compute_edge_month_metrics
+from output import extract_vco_name, write_month_csvs, create_zip_archive
 
 urllib3.disable_warnings(urllib3.exceptions.InsecureRequestWarning)
 
@@ -435,3 +439,23 @@ if __name__ == "__main__":
             f"\n95th percentile collection complete: "
             f"{len(metrics_results)} edge-month records computed"
         )
+
+        if not metrics_results:
+            print("No metrics data collected -- skipping output packaging")
+        else:
+            timestamp = datetime.now().strftime("%Y%m%d_%H%M%S")
+            tmpdir = None
+            try:
+                vco_name = extract_vco_name(vco_url)
+                tmpdir = tempfile.mkdtemp(prefix=f"vco_metrics_{timestamp}_")
+                csv_paths = write_month_csvs(
+                    merged_df, metrics_results, target_months, vco_name, tmpdir
+                )
+                print(f"  Wrote {len(csv_paths)} CSV file(s) to temp directory")
+                zip_filename = f"{vco_name}_metrics_{timestamp}.zip"
+                zip_path = create_zip_archive(tmpdir, zip_filename)
+                print(f"Metrics archive created: {zip_path}")
+            finally:
+                if tmpdir and os.path.exists(tmpdir):
+                    shutil.rmtree(tmpdir)
+                    print("  Temp directory cleaned up")
