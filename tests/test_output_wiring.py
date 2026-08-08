@@ -1,14 +1,12 @@
 """Tests verifying vco_edge_export correctly wires output module functions.
 
-These tests verify that the output module functions (extract_vco_name,
-write_month_csvs, create_zip_archive) are imported into the vco_edge_export
-namespace and can be called with the correct argument types and shapes during
-the --collect_95th pipeline.
+These tests call the REAL functions through the vco_edge_export namespace
+(not mocks), confirming that imports resolve and produce correct results.
 
 VCO_TOKEN and VCO_URL are set by conftest.py before this module is imported,
 so vco_edge_export's module-level os.getenv() calls use test credentials.
 """
-from unittest.mock import patch
+import zipfile
 
 import pandas as pd
 
@@ -27,46 +25,53 @@ def test_output_imports_present():
     assert callable(create_zip_archive)
 
 
-# ── argument shape verification ────────────────────────────────────────────
+# ── real invocation through vco_edge_export namespace ─────────────────────
 
 
-def test_extract_vco_name_called_with_vco_url():
-    """extract_vco_name can be called with the module-level vco_url value."""
-    with patch("vco_edge_export.extract_vco_name") as mock_fn:
-        mock_fn.return_value = "vco.test.com"
-        mock_fn(vco_edge_export.vco_url)
-        mock_fn.assert_called_with(vco_edge_export.vco_url)
+def test_extract_vco_name_returns_hostname_via_namespace():
+    """extract_vco_name called through vco_edge_export returns hostname from vco_url."""
+    result = vco_edge_export.extract_vco_name(vco_edge_export.vco_url)
+    # conftest sets VCO_URL to "https://test.example.com/portal/"
+    assert result == "test.example.com"
 
 
-def test_write_month_csvs_receives_correct_args():
-    """write_month_csvs mock is called with exactly 5 positional arguments."""
-    with patch("vco_edge_export.write_month_csvs") as mock_fn:
-        merged_df = pd.DataFrame(
-            {"Customer Name": ["Acme Corp"], "Edge Name": ["edge-01"]}
-        )
-        metrics_results = [
-            {
-                "enterprise_name": "Acme Corp",
-                "edge_name": "edge-01",
-                "month_label": "07-2026",
-                "monthly_tx_95th_mbps": 1.5,
-                "monthly_rx_95th_mbps": 2.5,
-                "monthly_total_95th_mbps": 4.0,
-            }
-        ]
-        target_months = [{"label": "07-2026"}]
+def test_write_month_csvs_produces_csv_via_namespace(tmp_path):
+    """write_month_csvs called through vco_edge_export creates a CSV file with metrics columns."""
+    merged_df = pd.DataFrame(
+        {"Customer Name": ["Acme Corp"], "Edge Name": ["edge-01"]}
+    )
+    metrics_results = [
+        {
+            "enterprise_name": "Acme Corp",
+            "edge_name": "edge-01",
+            "month_label": "07-2026",
+            "monthly_tx_95th_mbps": 1.5,
+            "monthly_rx_95th_mbps": 2.5,
+            "monthly_total_95th_mbps": 4.0,
+        }
+    ]
+    target_months = [{"label": "07-2026"}]
 
-        mock_fn(merged_df, metrics_results, target_months, "vco.test.com", "/tmp/test")
+    csv_paths = vco_edge_export.write_month_csvs(
+        merged_df, metrics_results, target_months, "vco.test.com", str(tmp_path)
+    )
 
-        mock_fn.assert_called_once()
-        call_args = mock_fn.call_args
-        assert len(call_args[0]) == 5
+    assert len(csv_paths) == 1
+    assert (tmp_path / "vco.test.com.07-2026.csv").exists()
+    df = pd.read_csv(csv_paths[0])
+    assert "monthly_tx_95th_mbps" in df.columns
 
 
-def test_create_zip_archive_called_with_zip_extension():
-    """create_zip_archive zip_path argument ends with the .zip extension."""
-    with patch("vco_edge_export.create_zip_archive") as mock_fn:
-        mock_fn.return_value = "test.zip"
-        mock_fn("/tmp/source", "output.zip")
-        call_args = mock_fn.call_args
-        assert call_args[0][1].endswith(".zip")
+def test_create_zip_archive_produces_zip_via_namespace(tmp_path):
+    """create_zip_archive called through vco_edge_export creates a valid zip with .zip extension."""
+    csv_dir = tmp_path / "csvs"
+    csv_dir.mkdir()
+    (csv_dir / "test.csv").write_text("a,b\n1,2\n")
+    zip_path = str(tmp_path / "output.zip")
+
+    result = vco_edge_export.create_zip_archive(str(csv_dir), zip_path)
+
+    assert result == zip_path
+    assert result.endswith(".zip")
+    with zipfile.ZipFile(zip_path, "r") as zf:
+        assert "test.csv" in zf.namelist()
