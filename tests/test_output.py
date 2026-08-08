@@ -44,6 +44,16 @@ class TestExtractVcoName:
         """extract_vco_name returns hostname for URL with no path component."""
         assert extract_vco_name("https://vco.example.com") == "vco.example.com"
 
+    def test_scheme_less_url_raises(self):
+        """extract_vco_name raises ValueError for a URL without a scheme."""
+        with pytest.raises(ValueError, match="scheme"):
+            extract_vco_name("vco.example.com/portal/")
+
+    def test_empty_url_raises(self):
+        """extract_vco_name raises ValueError for an empty string."""
+        with pytest.raises(ValueError, match="Cannot extract hostname"):
+            extract_vco_name("")
+
 
 # ── write_month_csvs ───────────────────────────────────────────────────────
 
