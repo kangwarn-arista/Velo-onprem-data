@@ -134,6 +134,7 @@ def create_zip_archive(source_dir: str, zip_path: str) -> str:
     """
     with zipfile.ZipFile(zip_path, "w", zipfile.ZIP_DEFLATED) as zf:
         for file in Path(source_dir).iterdir():
-            zf.write(file, arcname=file.name)
+            if file.is_file():
+                zf.write(file, arcname=file.name)
 
     return zip_path
