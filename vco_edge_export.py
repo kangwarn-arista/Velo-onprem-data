@@ -384,6 +384,21 @@ if __name__ == "__main__":
     )
 
     if args.collect_95th:
+        # Deduplicate edge_info_list to prevent fan-out rows in metrics CSVs
+        seen_edges = set()
+        deduped_edge_info_list = []
+        for ei in edge_info_list:
+            key = (ei["enterprise_id"], ei["edge_id"])
+            if key not in seen_edges:
+                seen_edges.add(key)
+                deduped_edge_info_list.append(ei)
+            else:
+                logging.warning(
+                    "Duplicate edge id=%s name='%s' — skipping duplicate metrics collection",
+                    ei["edge_id"], ei["edge_name"],
+                )
+        edge_info_list = deduped_edge_info_list
+
         target_months = get_target_months(args.months)
         print(
             f"\nCollecting 95th percentile metrics for {len(target_months)} month(s): "
