@@ -26,12 +26,16 @@ Produce a single, accurate CSV report combining VCO license CSV export data with
 
 ### Active
 
-- [ ] CLI argument parsing for `--collect_95th` and `--months N`
-- [ ] Per-edge link metrics collection via `metrics/getEdgeLinkSeries` API
-- [ ] Bytes-to-Mbps conversion with cross-link aggregation
-- [ ] Daily and monthly 95th percentile calculation
-- [ ] Per-month CSV output with metrics columns
-- [ ] Timestamped temp directory and zip compression
+None — all v1.1 requirements validated.
+
+### Recently Validated (v1.1)
+
+- CLI argument parsing for `--collect_95th` and `--months N` — Phase 03
+- Per-edge link metrics collection via `metrics/getEdgeLinkSeries` API — Phase 04
+- Bytes-to-Mbps conversion with cross-link aggregation — Phase 04
+- Daily and monthly 95th percentile calculation — Phase 04
+- Per-month CSV output with metrics columns — Phase 05
+- Timestamped temp directory and zip compression — Phase 05
 
 ## Current Milestone: v1.1 95th Percentile Utilization Metrics
 
