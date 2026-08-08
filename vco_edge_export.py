@@ -411,9 +411,15 @@ if __name__ == "__main__":
                     )
                     print(
                         f"    {month['label']}: "
-                        f"tx={metrics['monthly_tx_95th_mbps']:.4f} "
+                        f"p95 tx={metrics['monthly_tx_95th_mbps']:.4f} "
                         f"rx={metrics['monthly_rx_95th_mbps']:.4f} "
-                        f"total={metrics['monthly_total_95th_mbps']:.4f} Mbps"
+                        f"total={metrics['monthly_total_95th_mbps']:.4f} | "
+                        f"max tx={metrics['monthly_tx_max_mbps']:.4f} "
+                        f"rx={metrics['monthly_rx_max_mbps']:.4f} "
+                        f"total={metrics['monthly_total_max_mbps']:.4f} | "
+                        f"avg tx={metrics['monthly_tx_avg_mbps']:.4f} "
+                        f"rx={metrics['monthly_rx_avg_mbps']:.4f} "
+                        f"total={metrics['monthly_total_avg_mbps']:.4f} Mbps"
                     )
                 except VCOAuthError:
                     raise  # Auth failures should still terminate
