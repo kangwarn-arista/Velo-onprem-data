@@ -21,7 +21,7 @@
 
 - [x] **Phase 3: CLI & Configuration** - Argparse flags for `--collect_95th` and `--months N` without breaking existing behavior (completed 2026-08-06)
 - [x] **Phase 4: Metrics Collection & Calculation** - Fetch per-edge link series from VCO API and compute 95th percentile tx/rx/total values (completed 2026-08-06)
-- [ ] **Phase 5: Output & Packaging** - Write per-month CSVs and compress into a timestamped zip archive
+- [x] **Phase 5: Output & Packaging** - Write per-month CSVs and compress into a timestamped zip archive (completed 2026-08-08)
 
 ## Phase Details
 
@@ -77,7 +77,7 @@ Plans:
   3. Each CSV contains 4 additional columns: Month-Year, monthly_tx_95th_mbps, monthly_rx_95th_mbps, monthly_total_95th_mbps
   4. All CSVs are stored in a timestamped temp directory before being compressed into the zip
 
-**Plans:** 1/2 plans executed
+**Plans:** 2/2 plans complete
 Plans:
 **Wave 1**
 
@@ -85,7 +85,7 @@ Plans:
 
 **Wave 2** *(blocked on Wave 1 completion)*
 
-- [ ] 05-02-PLAN.md — Wire output module into __main__ block with timestamped temp dir, zip packaging, and cleanup
+- [x] 05-02-PLAN.md — Wire output module into __main__ block with timestamped temp dir, zip packaging, and cleanup
 
 ## Progress
 
@@ -95,4 +95,4 @@ Plans:
 | 2. Merge and Output | v1.0 | 1/1 | Complete | 2026-07-28 |
 | 3. CLI & Configuration | v1.1 | 1/1 | Complete   | 2026-08-06 |
 | 4. Metrics Collection & Calculation | v1.1 | 2/2 | Complete   | 2026-08-06 |
-| 5. Output & Packaging | v1.1 | 1/2 | In Progress|  |
+| 5. Output & Packaging | v1.1 | 2/2 | Complete   | 2026-08-08 |
