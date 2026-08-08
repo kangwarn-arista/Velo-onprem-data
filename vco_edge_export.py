@@ -59,7 +59,8 @@ def api_call(method, params, max_retries=5):
                     retry_after = int(resp.headers.get("Retry-After", 2 ** attempt))
                 except (ValueError, TypeError):
                     retry_after = 2 ** attempt
-                print(f"  Rate limited (429) on {method}, retrying in {retry_after}s (attempt {attempt + 1}/{max_retries})")
+                logging.warning("Rate limited (429) on %s, retrying in %ds (attempt %d/%d)",
+                                method, retry_after, attempt + 1, max_retries)
                 time.sleep(retry_after)
                 continue
 
@@ -81,7 +82,7 @@ def api_call(method, params, max_retries=5):
                         f"This typically indicates an invalid or expired token."
                     )
                 # For non-auth JSON-RPC errors, log and return empty dict
-                print(f"API Error on '{method}': {error_msg}")
+                logging.error("API Error on '%s': %s", method, error_msg)
                 return {}
 
             return result
@@ -89,13 +90,13 @@ def api_call(method, params, max_retries=5):
         except VCOAuthError:
             raise
         except requests.exceptions.HTTPError as e:
-            print(f"API Error: {e}")
+            logging.error("API Error: %s", e)
             return {}
         except Exception as e:
-            print(f"API Error: {e}")
+            logging.error("API Error: %s", e)
             return {}
 
-    print(f"API Error: max retries exceeded for {method}")
+    logging.error("API Error: max retries exceeded for %s", method)
     return {}
 
 
