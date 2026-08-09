@@ -8,7 +8,7 @@ stdlib -- no third-party dependencies.
 import calendar
 import math
 from collections import defaultdict
-from datetime import date, datetime, timezone
+from datetime import date, datetime, timedelta, timezone
 
 SAMPLES_PER_DAY = 288  # 12 samples/hr × 24 hrs (5-minute intervals)
 
@@ -90,6 +90,42 @@ def max_samples_for_month(year: int, month: int) -> int:
     """
     _, days = calendar.monthrange(year, month)
     return days * SAMPLES_PER_DAY
+
+
+def get_last_30_days(
+    reference_date: date | None = None,
+) -> list[dict]:
+    """Return a single-element list covering the trailing 30 days ending today.
+
+    The window runs from ``(reference_date - 29 days) 00:00 UTC`` to
+    ``(reference_date + 1 day) 00:00 UTC``, inclusive of the reference date.
+
+    Args:
+        reference_date: The "today" anchor.  Defaults to ``date.today()``.
+
+    Returns:
+        A one-element list with the same dict shape as
+        :func:`get_target_months`: ``year``, ``month``, ``start_ms``,
+        ``end_ms``, and ``label`` (fixed to ``"last30d"``).
+    """
+    if reference_date is None:
+        reference_date = date.today()
+
+    end_date = reference_date + timedelta(days=1)
+    start_date = end_date - timedelta(days=30)
+
+    start_dt = datetime(start_date.year, start_date.month, start_date.day, tzinfo=timezone.utc)
+    end_dt = datetime(end_date.year, end_date.month, end_date.day, tzinfo=timezone.utc)
+
+    return [
+        {
+            "year": reference_date.year,
+            "month": reference_date.month,
+            "start_ms": int(start_dt.timestamp() * 1000),
+            "end_ms": int(end_dt.timestamp() * 1000),
+            "label": "last30d",
+        }
+    ]
 
 
 def bytes_to_mbps(byte_count: int | float) -> float:
