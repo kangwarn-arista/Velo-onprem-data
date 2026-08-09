@@ -54,3 +54,31 @@
 
 - [v1.1-ROADMAP.md](milestones/v1.1-ROADMAP.md)
 - [v1.1-REQUIREMENTS.md](milestones/v1.1-REQUIREMENTS.md)
+
+---
+
+## v1.2 — Quick Enhancements
+
+**Shipped:** 2026-08-08
+**Archived:** 2026-08-08
+**Quick Tasks:** 4 | **Commits:** 7
+
+### Accomplishments
+
+1. Maestro vs VCO CSV comparison tool (`compare_exports.py`) — joins on Edge Logical ID, compares serial/name/status/model/license/bandwidth with configurable tolerance
+2. Max and average of daily 95th percentile metrics — 6 new summary keys alongside existing monthly P95 values
+3. Trailing 30-day metrics window (`--last_30_days`) — alternative to calendar month ranges
+4. Bandwidth comparison display improvements — show all rows, highlight flagged deltas with `>>>`
+
+### Stats
+
+- Files changed: 9
+- Lines: +1,122 / -116
+- Timeline: 2026-08-08 (single day)
+- Commits: 7
+- Branch: `vco_script_update`
+- Test suite: 98 tests total (+45 from v1.1)
+
+### Archive
+
+- [v1.2-ROADMAP.md](milestones/v1.2-ROADMAP.md)

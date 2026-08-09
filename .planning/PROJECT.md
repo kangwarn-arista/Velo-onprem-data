@@ -2,7 +2,7 @@
 
 ## What This Is
 
-A Python CLI tool that exports edge device and license data from VMware VeloCloud Orchestrator (VCO) on-premises instances via JSON-RPC 2.0 API. It merges network-wide license CSV export data with per-enterprise edge status into an enriched CSV report, and optionally collects per-edge 95th percentile bandwidth utilization metrics across configurable month ranges, output as per-month CSVs in a timestamped zip archive.
+A Python CLI tool that exports edge device and license data from VMware VeloCloud Orchestrator (VCO) on-premises instances via JSON-RPC 2.0 API. It merges network-wide license CSV export data with per-enterprise edge status into an enriched CSV report, and optionally collects per-edge 95th percentile bandwidth utilization metrics (including max/avg of daily P95s) across configurable month ranges or trailing 30-day windows, output as per-month CSVs in a timestamped zip archive. Includes a companion CSV comparison tool for Maestro vs VCO export validation.
 
 ## Core Value
 
@@ -29,10 +29,18 @@ Produce a single, accurate CSV report combining VCO license CSV export data with
 - Daily and monthly 95th percentile calculation — v1.1
 - Per-month CSV output with metrics columns — v1.1
 - Timestamped temp directory and zip compression — v1.1
+- Max and average of daily P95 metrics (6 summary keys: monthly_{tx,rx,total}_{max,avg}_mbps) — v1.2
+- `--last_30_days` trailing 30-day metrics window (mutually exclusive with `--months`) — v1.2
+- Maestro vs VCO CSV comparison tool (`compare_exports.py`) with bandwidth tolerance checking — v1.2
+- Bandwidth comparison display showing all rows with flagged highlights — v1.2
 
 ### Active
 
 None — planning next milestone.
+
+## Shipped: v1.2 Quick Enhancements (2026-08-08)
+
+Maestro vs VCO CSV comparison tool, max/avg daily P95 metrics, trailing 30-day window, improved BW comparison display. 4 quick tasks, 98 tests total.
 
 ## Shipped: v1.1 95th Percentile Utilization Metrics (2026-08-08)
 
@@ -48,11 +56,11 @@ Added optional per-edge 95th percentile bandwidth utilization metrics (tx, rx, t
 
 ## Context
 
-Shipped v1.1 with 3,042 LOC across 13 Python files (8 source + 5 test).
+Shipped v1.2 with 3,183 LOC across 14 Python files (9 source + 5 test).
 Tech stack: Python 3.13, requests, pandas, openpyxl, python-dotenv, pytest, managed via `uv`.
-Output: `vco_edge_export.csv` (enriched license+edge-status report), plus optional `{vco_name}_metrics_{timestamp}.zip` with per-month 95th percentile CSVs.
-New modules added in v1.1: `metrics.py` (pure computation), `output.py` (CSV/zip packaging), `compare_exports.py` (CSV comparison utility).
-Test suite: 53 tests via pytest (CLI, metrics, API wiring, output, integration).
+Output: `vco_edge_export.csv` (enriched license+edge-status report), plus optional `{vco_name}_metrics_{timestamp}.zip` with per-month 95th percentile CSVs (including max/avg of daily P95s).
+Modules: `metrics.py` (pure computation with daily P95s, max/avg, validation, diagnostics), `output.py` (CSV/zip packaging), `compare_exports.py` (Maestro vs VCO CSV comparison).
+Test suite: 98 tests via pytest (CLI, metrics, API wiring, output, integration).
 
 ## Constraints
 
@@ -75,6 +83,9 @@ Test suite: 53 tests via pytest (CLI, metrics, API wiring, output, integration).
 | Left merge for metrics enrichment | Unmatched edges get NaN automatically | Good — no explicit null-setting needed |
 | tempfile.mkdtemp with try/finally | Secure temp dir, guaranteed cleanup | Good — no leaked temp files |
 | Conditional metrics pipeline | Only runs when --collect_95th is set | Good — zero overhead for base CSV workflow |
+| Quick tasks for post-milestone work | Small enhancements don't need formal phases | Good — faster iteration |
+| compare_exports.py as standalone script | Not integrated into main export pipeline; different use case | Good — clean separation |
+| --last_30_days mutually exclusive with --months | Avoids confusing overlapping windows | Good — clear semantics |
 
 ## Evolution
 
@@ -94,4 +105,4 @@ This document evolves at phase transitions and milestone boundaries.
 4. Update Context with current state
 
 ---
-*Last updated: 2026-08-08 after v1.1 milestone*
+*Last updated: 2026-08-08 after v1.2 milestone*

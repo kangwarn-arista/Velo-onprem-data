@@ -1,16 +1,17 @@
 ---
 gsd_state_version: 1.0
-milestone: v1.1
-milestone_name: 95th Percentile Utilization Metrics
+milestone: v1.2
+milestone_name: Quick Enhancements
 status: milestone_complete
-stopped_at: Milestone v1.1 archived
-last_updated: 2026-08-08T16:38:00.000Z
-last_activity: 2026-08-08 -- Milestone v1.1 archived and completed
+stopped_at: Milestone v1.2 archived
+last_updated: 2026-08-08T20:30:00.000Z
+last_activity: 2026-08-08 -- Milestone v1.2 archived and completed
 progress:
-  total_phases: 3
-  completed_phases: 3
-  total_plans: 5
-  completed_plans: 5
+  total_phases: 0
+  completed_phases: 0
+  total_plans: 0
+  completed_plans: 0
+  quick_tasks: 4
   percent: 100
 ---
 
@@ -25,10 +26,10 @@ See: .planning/PROJECT.md (updated 2026-08-08)
 
 ## Current Position
 
-Phase: Complete (v1.1 shipped)
+Phase: Complete (v1.2 shipped)
 Plan: N/A
 Status: Milestone complete
-Last activity: 2026-08-08 - Milestone v1.1 archived
+Last activity: 2026-08-08 - Milestone v1.2 archived
 
 Progress: [██████████] 100%
 
@@ -36,17 +37,17 @@ Progress: [██████████] 100%
 
 **Velocity:**
 
-- Total plans completed: 5
-- Total execution time: ~63 minutes
-- Phases: 3
+- Total plans completed: 5 (v1.1) + 4 quick tasks (v1.2)
+- Phases: 3 (v1.1)
+- Quick tasks: 4 (v1.2)
 
-**By Phase:**
+**By Milestone:**
 
-| Phase | Plans | Total | Avg/Plan |
-|-------|-------|-------|----------|
-| 03 | 1 | ~4min | ~4min |
-| 04 | 2 | ~15min | ~7.5min |
-| 05 | 2 | ~48min | ~24min |
+| Milestone | Type | Count | Duration |
+|-----------|------|-------|----------|
+| v1.0 | 2 phases, 2 plans | 4 tasks | 1 day |
+| v1.1 | 3 phases, 5 plans | 9 tasks | 4 days |
+| v1.2 | 4 quick tasks | 7 commits | 1 day |
 
 ## Accumulated Context
 
@@ -66,18 +67,17 @@ None.
 
 | # | Description | Date | Commit | Directory |
 |---|-------------|------|--------|-----------|
-| 260808-pip | Add compare_exports.py CSV comparison script | 2026-08-09 | e343746 | [260808-pip-add-compare-exports-py-csv-comparison-sc](./quick/260808-pip-add-compare-exports-py-csv-comparison-sc/) |
+| 260808-pip | Add compare_exports.py CSV comparison script | 2026-08-08 | e343746 | [260808-pip-add-compare-exports-py-csv-comparison-sc](./quick/260808-pip-add-compare-exports-py-csv-comparison-sc/) |
+| 260808-q4m | Add max/avg of daily P95 metrics + refactor metrics pipeline | 2026-08-08 | d9bd366, 1e85b27 | [20260808-add-max-avg-metrics](./quick/20260808-add-max-avg-metrics/) |
+| 260808-l30 | Add --last_30_days CLI flag for trailing 30-day metrics | 2026-08-08 | 08c8b6f, bbf3df3 | [20260808-add-last-30-days-flag](./quick/20260808-add-last-30-days-flag/) |
+| 260808-bwh | Show all BW comparisons with highlight for >= threshold | 2026-08-08 | 15a986e | [20260808-bw-show-all-highlight](./quick/20260808-bw-show-all-highlight/) |
 
 ## Deferred Items
 
-Items acknowledged and carried forward from previous milestone close:
-
-| Category | Item | Status | Deferred At |
-|----------|------|--------|-------------|
-| *(none)* | | | |
+None.
 
 ## Session Continuity
 
 Last session: 2026-08-08
-Stopped at: Milestone v1.1 archived — ready for next milestone
+Stopped at: Milestone v1.2 archived — ready for next milestone
 Resume file: None
