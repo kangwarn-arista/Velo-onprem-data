@@ -1,15 +1,43 @@
 # VCO On-Prem Data Export
 
-Python scripts that export data from VMware VeloCloud Orchestrator (VCO) on-premises instances via JSON-RPC 2.0 API.
+Python CLI tools that export data from VMware VeloCloud Orchestrator (VCO) on-premises instances via JSON-RPC 2.0 API. Outputs styled Excel spreadsheets with optional 95th percentile bandwidth metrics.
 
 ## Scripts
 
 ### `vco_edge_export.py`
 
-Merges the VCO network-wide license CSV export with per-enterprise edge status data. Outputs a single CSV file with license details enriched by edge state and UUID.
+Exports edge device and license data by merging the VCO network-wide license CSV export with per-enterprise edge status. Optionally collects 95th percentile bandwidth metrics per edge link.
 
 ```bash
-uv run python vco_edge_export.py    # → vco_edge_export.csv
+# Basic export — edges + license data
+uv run python vco_edge_export.py
+
+# With 95th percentile bandwidth metrics (last 3 complete months)
+uv run python vco_edge_export.py --collect_95th --months 3
+
+# Trailing 30 days instead of complete calendar months
+uv run python vco_edge_export.py --collect_95th --last_30_days
+
+# Diagnose metrics for a specific edge
+uv run python vco_edge_export.py --collect_95th --diagnose "edge-name"
+```
+
+**CLI options:**
+
+| Flag | Description |
+|------|-------------|
+| `--collect_95th` | Enable 95th percentile bandwidth metrics collection per edge link |
+| `--months N` | Number of complete months to collect (used with `--collect_95th`) |
+| `--last_30_days` | Collect metrics for the trailing 30 days instead of complete calendar months |
+| `--strict_validation` | Abort on sample count mismatch instead of logging a warning |
+| `--diagnose EDGE_NAME` | Print detailed diagnostic output for a specific edge and exit |
+
+### `compare_exports.py`
+
+Compares a Maestro license export CSV against a VCO edge export CSV. Joins on Edge UUID and compares serial number, edge name, model, license, and status.
+
+```bash
+uv run python compare_exports.py <maestro_csv> <vco_csv> <enterprise_name>
 ```
 
 ### `get_all_users.py`
@@ -19,6 +47,13 @@ Audits all enterprise and partner/operator users across the VCO. Outputs a style
 ```bash
 uv run python get_all_users.py      # → vco_user_audit.xlsx
 ```
+
+## Modules
+
+| Module | Purpose |
+|--------|---------|
+| `metrics.py` | Pure computation functions for bandwidth metrics — month ranges, bytes-to-Mbps, 95th percentile, sample aggregation |
+| `output.py` | CSV generation and zip packaging for per-month metric output files |
 
 ## Setup
 
@@ -81,3 +116,4 @@ Both scripts validate configuration at startup and fail fast on authentication e
 | `license/exportNetworkEdgeLicenseData` | Network-wide license CSV export |
 | `enterprise/getEnterpriseUsers` | Users per enterprise |
 | `network/getNetworkOperatorUsers` | Partner-level users |
+| `metrics/getEdgeLinkTimeSeries` | Per-link bandwidth time series for 95th percentile calculation |
