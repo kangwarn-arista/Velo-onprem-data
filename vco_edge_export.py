@@ -13,11 +13,13 @@ from requests.structures import CaseInsensitiveDict
 import os
 
 from metrics import (
+    get_last_30_days,
     get_target_months,
     compute_daily_p95s,
     compute_edge_month_metrics,
     diagnose_edge_metrics,
     max_samples_for_month,
+    SAMPLES_PER_DAY,
     validate_sample_count,
 )
 from output import extract_vco_name, write_month_csvs, create_zip_archive
@@ -228,11 +230,18 @@ def build_parser() -> argparse.ArgumentParser:
         default=False,
         help="Enable 95th percentile bandwidth metrics collection per edge link.",
     )
-    parser.add_argument(
+    time_group = parser.add_mutually_exclusive_group()
+    time_group.add_argument(
         "--months",
         type=int,
         default=1,
         help="Number of complete months to collect for 95th percentile metrics (used with --collect_95th).",
+    )
+    time_group.add_argument(
+        "--last_30_days",
+        action="store_true",
+        default=False,
+        help="Collect metrics for the trailing 30 days (including today) instead of complete calendar months.",
     )
     parser.add_argument(
         "--strict_validation",
@@ -274,12 +283,15 @@ if __name__ == "__main__":
         f"{'provided with prefix' if os.getenv('VCO_TOKEN').startswith('Token ') else 'bare token, prefix auto-added'}"
     )
 
-    if args.months < 1 or args.months > 12:
+    if not args.last_30_days and (args.months < 1 or args.months > 12):
         logging.error("--months must be between 1 and 12, got %d", args.months)
         exit(1)
 
     if args.collect_95th:
-        logging.info("95th percentile collection enabled for %d month(s).", args.months)
+        if args.last_30_days:
+            logging.info("95th percentile collection enabled for last 30 days.")
+        else:
+            logging.info("95th percentile collection enabled for %d month(s).", args.months)
     else:
         logging.info("95th percentile collection disabled — standard edge export mode.")
 
@@ -450,13 +462,17 @@ if __name__ == "__main__":
         print(f"  State      : {matched_edge['edge_state']}")
         print(f"  Serial     : {matched_edge['serial_number']}")
 
-        target_months = get_target_months(args.months)
+        target_months = get_last_30_days() if args.last_30_days else get_target_months(args.months)
         for month in target_months:
             print(f"\n{'─' * 60}")
             print(f"Month: {month['label']}")
             print(f"{'─' * 60}")
 
-            samples = max_samples_for_month(month["year"], month["month"])
+            samples = (
+                30 * SAMPLES_PER_DAY
+                if args.last_30_days
+                else max_samples_for_month(month["year"], month["month"])
+            )
             print(f"  Expected samples: {samples}")
 
             response = get_edge_link_series(
@@ -541,9 +557,10 @@ if __name__ == "__main__":
                 )
         edge_info_list = deduped_edge_info_list
 
-        target_months = get_target_months(args.months)
+        target_months = get_last_30_days() if args.last_30_days else get_target_months(args.months)
         print(
-            f"\nCollecting 95th percentile metrics for {len(target_months)} month(s): "
+            f"\nCollecting 95th percentile metrics for "
+            f"{'last 30 days' if args.last_30_days else f'{len(target_months)} month(s)'}: "
             f"{', '.join(m['label'] for m in target_months)}"
         )
         metrics_results = []
@@ -554,7 +571,11 @@ if __name__ == "__main__":
             )
             for month in target_months:
                 try:
-                    samples = max_samples_for_month(month["year"], month["month"])
+                    samples = (
+                        30 * SAMPLES_PER_DAY
+                        if args.last_30_days
+                        else max_samples_for_month(month["year"], month["month"])
+                    )
                     response = get_edge_link_series(
                         edge_info["enterprise_id"],
                         edge_info["edge_id"],
