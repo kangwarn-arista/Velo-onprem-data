@@ -59,8 +59,9 @@ def write_month_csvs(
             data.  Must include at least ``"Customer Name"`` and
             ``"Edge Name"`` columns.
         metrics_results: List of dicts, each with keys ``enterprise_name``,
-            ``edge_name``, ``month_label``, ``monthly_tx_95th_mbps``,
-            ``monthly_rx_95th_mbps``, and ``monthly_total_95th_mbps``.
+            ``edge_name``, ``month_label``, ``monthly_{tx,rx,total}_95th_mbps``,
+            ``monthly_{tx,rx,total}_max_mbps``, and
+            ``monthly_{tx,rx,total}_avg_mbps``.
         target_months: List of month dicts as returned by
             :func:`metrics.get_target_months`, each with a ``"label"`` key
             (format ``"MM-YYYY"``).
@@ -98,6 +99,12 @@ def write_month_csvs(
                     "monthly_tx_95th_mbps",
                     "monthly_rx_95th_mbps",
                     "monthly_total_95th_mbps",
+                    "monthly_tx_max_mbps",
+                    "monthly_rx_max_mbps",
+                    "monthly_total_max_mbps",
+                    "monthly_tx_avg_mbps",
+                    "monthly_rx_avg_mbps",
+                    "monthly_total_avg_mbps",
                 ]
             ]
             month_df = month_df.merge(
@@ -105,9 +112,18 @@ def write_month_csvs(
             )
         else:
             # No metrics at all for this month -- add NaN columns
-            month_df["monthly_tx_95th_mbps"] = float("nan")
-            month_df["monthly_rx_95th_mbps"] = float("nan")
-            month_df["monthly_total_95th_mbps"] = float("nan")
+            for col in (
+                "monthly_tx_95th_mbps",
+                "monthly_rx_95th_mbps",
+                "monthly_total_95th_mbps",
+                "monthly_tx_max_mbps",
+                "monthly_rx_max_mbps",
+                "monthly_total_max_mbps",
+                "monthly_tx_avg_mbps",
+                "monthly_rx_avg_mbps",
+                "monthly_total_avg_mbps",
+            ):
+                month_df[col] = float("nan")
 
         filename = f"{vco_name}.{month_label}.csv"
         full_path = str(Path(output_dir) / filename)

@@ -48,6 +48,12 @@ def test_write_month_csvs_produces_csv_via_namespace(tmp_path):
             "monthly_tx_95th_mbps": 1.5,
             "monthly_rx_95th_mbps": 2.5,
             "monthly_total_95th_mbps": 4.0,
+            "monthly_tx_max_mbps": 2.0,
+            "monthly_rx_max_mbps": 3.0,
+            "monthly_total_max_mbps": 5.0,
+            "monthly_tx_avg_mbps": 1.0,
+            "monthly_rx_avg_mbps": 1.8,
+            "monthly_total_avg_mbps": 2.8,
         }
     ]
     target_months = [{"label": "07-2026"}]
