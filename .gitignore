@@ -1,6 +1,7 @@
 # Output files
 *.xlsx
 *.csv
+*.zip
 
 # Secrets
 .env
@@ -18,3 +19,9 @@ CLAUDE.md
 # Python
 __pycache__/
 *.pyc
+
+# Distro directory
+dist/**
+
+# Mac Meta-data File
+.DS_Store
