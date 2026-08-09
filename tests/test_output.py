@@ -94,6 +94,12 @@ class TestWriteMonthCsvs:
                 "monthly_tx_95th_mbps": 1.5,
                 "monthly_rx_95th_mbps": 2.5,
                 "monthly_total_95th_mbps": 4.0,
+                "monthly_tx_max_mbps": 2.0,
+                "monthly_rx_max_mbps": 3.0,
+                "monthly_total_max_mbps": 5.0,
+                "monthly_tx_avg_mbps": 1.0,
+                "monthly_rx_avg_mbps": 1.8,
+                "monthly_total_avg_mbps": 2.8,
             }
         ]
 
@@ -125,6 +131,12 @@ class TestWriteMonthCsvs:
         assert "monthly_tx_95th_mbps" in df.columns
         assert "monthly_rx_95th_mbps" in df.columns
         assert "monthly_total_95th_mbps" in df.columns
+        assert "monthly_tx_max_mbps" in df.columns
+        assert "monthly_rx_max_mbps" in df.columns
+        assert "monthly_total_max_mbps" in df.columns
+        assert "monthly_tx_avg_mbps" in df.columns
+        assert "monthly_rx_avg_mbps" in df.columns
+        assert "monthly_total_avg_mbps" in df.columns
         # Original merged_df columns must also be present
         for col in merged_df.columns:
             assert col in df.columns
@@ -159,6 +171,12 @@ class TestWriteMonthCsvs:
         assert pd.isna(unmatched["monthly_tx_95th_mbps"].iloc[0])
         assert pd.isna(unmatched["monthly_rx_95th_mbps"].iloc[0])
         assert pd.isna(unmatched["monthly_total_95th_mbps"].iloc[0])
+        assert pd.isna(unmatched["monthly_tx_max_mbps"].iloc[0])
+        assert pd.isna(unmatched["monthly_rx_max_mbps"].iloc[0])
+        assert pd.isna(unmatched["monthly_total_max_mbps"].iloc[0])
+        assert pd.isna(unmatched["monthly_tx_avg_mbps"].iloc[0])
+        assert pd.isna(unmatched["monthly_rx_avg_mbps"].iloc[0])
+        assert pd.isna(unmatched["monthly_total_avg_mbps"].iloc[0])
 
     def test_two_months_creates_two_csvs(self, tmp_path):
         """write_month_csvs with 2 months returns a list of 2 paths and creates both files."""
@@ -171,6 +189,12 @@ class TestWriteMonthCsvs:
                 "monthly_tx_95th_mbps": 0.5,
                 "monthly_rx_95th_mbps": 0.8,
                 "monthly_total_95th_mbps": 1.3,
+                "monthly_tx_max_mbps": 0.7,
+                "monthly_rx_max_mbps": 1.0,
+                "monthly_total_max_mbps": 1.7,
+                "monthly_tx_avg_mbps": 0.3,
+                "monthly_rx_avg_mbps": 0.5,
+                "monthly_total_avg_mbps": 0.8,
             },
             {
                 "enterprise_name": "Acme Corp",
@@ -179,6 +203,12 @@ class TestWriteMonthCsvs:
                 "monthly_tx_95th_mbps": 1.5,
                 "monthly_rx_95th_mbps": 2.5,
                 "monthly_total_95th_mbps": 4.0,
+                "monthly_tx_max_mbps": 2.0,
+                "monthly_rx_max_mbps": 3.0,
+                "monthly_total_max_mbps": 5.0,
+                "monthly_tx_avg_mbps": 1.0,
+                "monthly_rx_avg_mbps": 1.8,
+                "monthly_total_avg_mbps": 2.8,
             },
         ]
         target_months = [

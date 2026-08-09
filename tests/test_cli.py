@@ -9,11 +9,12 @@ from vco_edge_export import build_parser
 
 
 def test_default_values():
-    """parse_args([]) yields collect_95th=False and months=1."""
+    """parse_args([]) yields collect_95th=False, months=1, strict_validation=False."""
     parser = build_parser()
     args = parser.parse_args([])
     assert args.collect_95th is False
     assert args.months == 1
+    assert args.strict_validation is False
 
 
 def test_collect_95th_flag():
@@ -45,9 +46,32 @@ def test_months_invalid_type():
         parser.parse_args(["--months", "abc"])
 
 
+def test_strict_validation_flag():
+    """parse_args(["--strict_validation"]) yields strict_validation=True."""
+    parser = build_parser()
+    args = parser.parse_args(["--strict_validation"])
+    assert args.strict_validation is True
+
+
+def test_diagnose_default_none():
+    """parse_args([]) yields diagnose=None."""
+    parser = build_parser()
+    args = parser.parse_args([])
+    assert args.diagnose is None
+
+
+def test_diagnose_flag():
+    """parse_args(["--diagnose", "WKEPRTR01"]) yields diagnose='WKEPRTR01'."""
+    parser = build_parser()
+    args = parser.parse_args(["--diagnose", "WKEPRTR01"])
+    assert args.diagnose == "WKEPRTR01"
+
+
 def test_help_contains_flags():
-    """parser.format_help() contains both --collect_95th and --months."""
+    """parser.format_help() contains --collect_95th, --months, --strict_validation, and --diagnose."""
     parser = build_parser()
     help_text = parser.format_help()
     assert "--collect_95th" in help_text
     assert "--months" in help_text
+    assert "--strict_validation" in help_text
+    assert "--diagnose" in help_text

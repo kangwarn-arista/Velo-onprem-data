@@ -2,8 +2,6 @@ import argparse
 import io
 import json
 import logging
-import shutil
-import tempfile
 import time
 from datetime import datetime
 import urllib3
@@ -14,7 +12,14 @@ from dotenv import load_dotenv
 from requests.structures import CaseInsensitiveDict
 import os
 
-from metrics import get_target_months, compute_edge_month_metrics
+from metrics import (
+    get_target_months,
+    compute_daily_p95s,
+    compute_edge_month_metrics,
+    diagnose_edge_metrics,
+    max_samples_for_month,
+    validate_sample_count,
+)
 from output import extract_vco_name, write_month_csvs, create_zip_archive
 
 urllib3.disable_warnings(urllib3.exceptions.InsecureRequestWarning)
@@ -155,7 +160,13 @@ def get_network_license_export() -> dict:
     return api_call(method, params)
 
 
-def get_edge_link_series(enterprise_id: int, edge_id: int, start_ms: int, end_ms: int) -> dict:
+def get_edge_link_series(
+    enterprise_id: int,
+    edge_id: int,
+    start_ms: int,
+    end_ms: int,
+    max_samples: int,
+) -> dict:
     """Fetch per-edge link bandwidth time-series data from VCO.
 
     Calls the metrics/getEdgeLinkSeries JSON-RPC method to retrieve
@@ -167,6 +178,8 @@ def get_edge_link_series(enterprise_id: int, edge_id: int, start_ms: int, end_ms
         edge_id: The numeric edge ID (the ``id`` field, not ``logicalId``).
         start_ms: Interval start timestamp in UTC milliseconds since epoch.
         end_ms: Interval end timestamp in UTC milliseconds since epoch.
+        max_samples: Maximum number of 5-minute samples to request.
+            Computed as ``days_in_month × 288``.
 
     Returns:
         The full parsed JSON-RPC response dict. The link series data is at
@@ -177,6 +190,7 @@ def get_edge_link_series(enterprise_id: int, edge_id: int, start_ms: int, end_ms
         "enterpriseId": enterprise_id,
         "edgeId": edge_id,
         "interval": {"start": start_ms, "end": end_ms},
+        "maxSamples": max_samples,
         "metrics": ["bytesTx", "bytesRx"],
     }
     return api_call(method, params)
@@ -219,6 +233,20 @@ def build_parser() -> argparse.ArgumentParser:
         type=int,
         default=1,
         help="Number of complete months to collect for 95th percentile metrics (used with --collect_95th).",
+    )
+    parser.add_argument(
+        "--strict_validation",
+        action="store_true",
+        default=False,
+        help="Abort on sample count mismatch instead of logging a warning.",
+    )
+    parser.add_argument(
+        "--diagnose",
+        type=str,
+        default=None,
+        metavar="EDGE_NAME",
+        help="Troubleshoot metrics for a specific edge by name. "
+             "Prints detailed diagnostic output and exits.",
     )
     return parser
 
@@ -384,6 +412,119 @@ if __name__ == "__main__":
         f"({matched_count} matched, {unmatched_count} unmatched)"
     )
 
+    # -- Diagnose mode --
+    if args.diagnose:
+        target_name = args.diagnose.strip()
+        logging.info("Diagnose mode: searching for edge '%s'", target_name)
+
+        # Find the edge across all enterprises
+        matched_edge = None
+        all_edge_names: list[str] = []
+        for ent in enterprise_ids:
+            edges = get_edges(ent)
+            edge_data = (edges.get("result") or {}).get("data", [])
+            for edge in edge_data:
+                name = edge.get("name", "")
+                all_edge_names.append(f"  {name} ({ent['name']})")
+                if name.lower() == target_name.lower():
+                    matched_edge = {
+                        "enterprise_id": ent["id"],
+                        "enterprise_name": ent["name"],
+                        "edge_id": edge.get("id"),
+                        "edge_name": name,
+                        "edge_state": edge.get("edgeState", "UNKNOWN"),
+                        "serial_number": edge.get("serialNumber", ""),
+                    }
+
+        if not matched_edge:
+            print(f"\nEdge '{target_name}' not found. Available edges:")
+            for en in sorted(all_edge_names):
+                print(en)
+            exit(1)
+
+        print(f"\n{'=' * 60}")
+        print(f"DIAGNOSTIC REPORT: {matched_edge['edge_name']}")
+        print(f"{'=' * 60}")
+        print(f"  Enterprise : {matched_edge['enterprise_name']}")
+        print(f"  Edge ID    : {matched_edge['edge_id']}")
+        print(f"  State      : {matched_edge['edge_state']}")
+        print(f"  Serial     : {matched_edge['serial_number']}")
+
+        target_months = get_target_months(args.months)
+        for month in target_months:
+            print(f"\n{'─' * 60}")
+            print(f"Month: {month['label']}")
+            print(f"{'─' * 60}")
+
+            samples = max_samples_for_month(month["year"], month["month"])
+            print(f"  Expected samples: {samples}")
+
+            response = get_edge_link_series(
+                matched_edge["enterprise_id"],
+                matched_edge["edge_id"],
+                month["start_ms"],
+                month["end_ms"],
+                samples,
+            )
+
+            link_series = response.get("result") or []
+            if not link_series:
+                print("  API returned empty result — no link data.")
+                if not response:
+                    print("  (API call itself failed — check logs above)")
+                elif "result" in response and response["result"] is None:
+                    print("  (API returned null result)")
+                continue
+
+            diag = diagnose_edge_metrics(link_series)
+            print(f"  Links found: {diag['link_count']}")
+
+            for link_detail in diag["links"]:
+                print(f"\n  Link ID: {link_detail['link_id']}")
+                for m in link_detail["metrics"]:
+                    status_parts = [f"samples={m['samples']}"]
+                    if m["none_count"] > 0:
+                        pct = m["none_count"] / m["samples"] * 100 if m["samples"] else 0
+                        status_parts.append(f"null={m['none_count']} ({pct:.1f}%)")
+                    if m["zero_count"] > 0:
+                        pct = m["zero_count"] / m["samples"] * 100 if m["samples"] else 0
+                        status_parts.append(f"zero={m['zero_count']} ({pct:.1f}%)")
+                    print(f"    {m['name']}: {', '.join(status_parts)}")
+
+            print(f"\n  Aggregated samples: {diag['total_samples_after_aggregation']}")
+            print(f"  All zeros: {diag['all_zero']}")
+
+            if diag["all_zero"]:
+                print("  >> No traffic data — metrics will be 0.0")
+            else:
+                daily_detail = compute_daily_p95s(link_series, month["start_ms"])
+
+                print(f"\n  Daily P95 values ({len(daily_detail)} days):")
+                print(f"  {'Date':<12} {'Samples':>7}  "
+                      f"{'Tx Mbps':>10}  {'Rx Mbps':>10}  {'Total Mbps':>12}")
+                print(f"  {'─' * 12} {'─' * 7}  "
+                      f"{'─' * 10}  {'─' * 10}  {'─' * 12}")
+                for day in daily_detail:
+                    print(f"  {day['date']!s:<12} {day['sample_count']:>7}  "
+                          f"{day['tx_p95']:>10.4f}  {day['rx_p95']:>10.4f}  "
+                          f"{day['total_p95']:>12.4f}")
+
+                metrics = compute_edge_month_metrics(link_series, month["start_ms"])
+                print(f"\n  Monthly calculation (from {len(daily_detail)} daily P95 values):")
+                print(f"    P95  — tx={metrics['monthly_tx_95th_mbps']:.4f}  "
+                      f"rx={metrics['monthly_rx_95th_mbps']:.4f}  "
+                      f"total={metrics['monthly_total_95th_mbps']:.4f} Mbps")
+                print(f"    Max  — tx={metrics['monthly_tx_max_mbps']:.4f}  "
+                      f"rx={metrics['monthly_rx_max_mbps']:.4f}  "
+                      f"total={metrics['monthly_total_max_mbps']:.4f} Mbps")
+                print(f"    Avg  — tx={metrics['monthly_tx_avg_mbps']:.4f}  "
+                      f"rx={metrics['monthly_rx_avg_mbps']:.4f}  "
+                      f"total={metrics['monthly_total_avg_mbps']:.4f} Mbps")
+
+        print(f"\n{'=' * 60}")
+        print("Diagnostic complete.")
+        exit(0)
+
     if args.collect_95th:
         # Deduplicate edge_info_list to prevent fan-out rows in metrics CSVs
         seen_edges = set()
@@ -413,13 +554,25 @@ if __name__ == "__main__":
             )
             for month in target_months:
                 try:
+                    samples = max_samples_for_month(month["year"], month["month"])
                     response = get_edge_link_series(
                         edge_info["enterprise_id"],
                         edge_info["edge_id"],
                         month["start_ms"],
                         month["end_ms"],
+                        samples,
                     )
                     link_series = response.get("result") or []
+                    validation = validate_sample_count(
+                        link_series, samples, strict=args.strict_validation,
+                    )
+                    if not validation["valid"]:
+                        logging.warning(
+                            "Sample count mismatch for edge %s month %s: %s",
+                            edge_info["edge_name"],
+                            month["label"],
+                            validation["links"],
+                        )
                     metrics = compute_edge_month_metrics(link_series, month["start_ms"])
                     metrics_results.append(
                         {
@@ -460,18 +613,13 @@ if __name__ == "__main__":
             print("No metrics data collected -- skipping output packaging")
         else:
             timestamp = datetime.now().strftime("%Y%m%d_%H%M%S")
-            tmpdir = None
-            try:
-                vco_name = extract_vco_name(vco_url)
-                tmpdir = tempfile.mkdtemp(prefix=f"vco_metrics_{timestamp}_")
-                csv_paths = write_month_csvs(
-                    merged_df, metrics_results, target_months, vco_name, tmpdir
-                )
-                print(f"  Wrote {len(csv_paths)} CSV file(s) to temp directory")
-                zip_filename = f"{vco_name}_metrics_{timestamp}.zip"
-                zip_path = create_zip_archive(tmpdir, zip_filename)
-                print(f"Metrics archive created: {zip_path}")
-            finally:
-                if tmpdir and os.path.exists(tmpdir):
-                    shutil.rmtree(tmpdir)
-                    print("  Temp directory cleaned up")
+            vco_name = extract_vco_name(vco_url)
+            output_dir = f"{vco_name}_metrics_{timestamp}"
+            os.makedirs(output_dir, exist_ok=True)
+            csv_paths = write_month_csvs(
+                merged_df, metrics_results, target_months, vco_name, output_dir
+            )
+            print(f"  Wrote {len(csv_paths)} CSV file(s) to {output_dir}/")
+            zip_filename = f"{output_dir}.zip"
+            zip_path = create_zip_archive(output_dir, zip_filename)
+            print(f"Metrics archive created: {zip_path}")
