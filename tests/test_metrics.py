@@ -1,19 +1,28 @@
 """Tests for metrics.py pure computation functions.
 
-Covers: get_target_months, bytes_to_mbps, percentile_95,
-aggregate_link_samples, compute_edge_month_metrics.
+Covers: get_target_months, max_samples_for_month, bytes_to_mbps,
+percentile_95, aggregate_link_samples, validate_sample_count,
+compute_edge_month_metrics, diagnose_edge_metrics.
 No VCO credentials needed -- metrics.py uses only stdlib.
 """
 from datetime import date, datetime, timezone
 
 import pytest
 
+# Byte count for one 5-min sample that converts to exactly 1.0 Mbps
+# (1_048_576 * 300 / 8 = BYTES_PER_SAMPLE_1MBPS)
+BYTES_PER_SAMPLE_1MBPS = 39_321_600
+
 from metrics import (
     aggregate_link_samples,
     bytes_to_mbps,
+    compute_daily_p95s,
     compute_edge_month_metrics,
+    diagnose_edge_metrics,
     get_target_months,
+    max_samples_for_month,
     percentile_95,
+    validate_sample_count,
 )
 
 
@@ -87,6 +96,42 @@ class TestGetTargetMonths:
             assert isinstance(entry["month"], int)
 
 
+# ── max_samples_for_month ─────────────────────────────────────────────────
+
+
+class TestMaxSamplesForMonth:
+    """Tests for month-aware sample count calculation."""
+
+    def test_31_day_month(self):
+        """July 2026 (31 days) returns 8928."""
+        assert max_samples_for_month(2026, 7) == 8928
+
+    def test_30_day_month(self):
+        """June 2026 (30 days) returns 8640."""
+        assert max_samples_for_month(2026, 6) == 8640
+
+    def test_february_non_leap(self):
+        """February 2025 (non-leap, 28 days) returns 8064."""
+        assert max_samples_for_month(2025, 2) == 8064
+
+    def test_february_leap_year(self):
+        """February 2024 (leap year, 29 days) returns 8352."""
+        assert max_samples_for_month(2024, 2) == 8352
+
+    def test_max_possible_value(self):
+        """No month exceeds 8928 samples (31 days × 288)."""
+        for month in range(1, 13):
+            assert max_samples_for_month(2026, month) <= 8928
+
+    def test_january(self):
+        """January (31 days) returns 8928."""
+        assert max_samples_for_month(2026, 1) == 8928
+
+    def test_april(self):
+        """April (30 days) returns 8640."""
+        assert max_samples_for_month(2026, 4) == 8640
+
+
 # ── bytes_to_mbps ──────────────────────────────────────────────────────────
 
 
@@ -102,8 +147,8 @@ class TestBytesToMbps:
         assert bytes_to_mbps(1_048_576) == pytest.approx(8 / 300)
 
     def test_exact_one_mbps(self):
-        """bytes_to_mbps(39_321_600) returns exactly 1.0."""
-        assert bytes_to_mbps(39_321_600) == 1.0
+        """bytes_to_mbps(BYTES_PER_SAMPLE_1MBPS) returns exactly 1.0."""
+        assert bytes_to_mbps(BYTES_PER_SAMPLE_1MBPS) == 1.0
 
 
 # ── percentile_95 ──────────────────────────────────────────────────────────
@@ -138,19 +183,32 @@ class TestPercentile95:
 
 
 class TestAggregateLinkSamples:
-    """Tests for cross-link sample aggregation."""
+    """Tests for cross-link sample aggregation.
+
+    The VCO API returns each link's series as metric objects:
+    [{"metric": "bytesTx", "data": [v0, v1, ...]}, {"metric": "bytesRx", "data": [...]}]
+    """
 
     def test_single_link_single_sample(self):
         """Single link with one sample returns one aggregated entry."""
-        links = [{"series": [{"bytesTx": 100, "bytesRx": 200}]}]
+        links = [{"series": [
+            {"metric": "bytesTx", "data": [100]},
+            {"metric": "bytesRx", "data": [200]},
+        ]}]
         result = aggregate_link_samples(links)
         assert result == [{"tx_bytes": 100, "rx_bytes": 200}]
 
     def test_two_links_sums_at_each_index(self):
         """Two links sum bytesTx and bytesRx at each sample index."""
         links = [
-            {"series": [{"bytesTx": 100, "bytesRx": 200}]},
-            {"series": [{"bytesTx": 50, "bytesRx": 60}]},
+            {"series": [
+                {"metric": "bytesTx", "data": [100]},
+                {"metric": "bytesRx", "data": [200]},
+            ]},
+            {"series": [
+                {"metric": "bytesTx", "data": [50]},
+                {"metric": "bytesRx", "data": [60]},
+            ]},
         ]
         result = aggregate_link_samples(links)
         assert result == [{"tx_bytes": 150, "rx_bytes": 260}]
@@ -163,9 +221,11 @@ class TestAggregateLinkSamples:
         """Link whose series is empty returns empty list."""
         assert aggregate_link_samples([{"series": []}]) == []
 
-    def test_missing_bytes_keys_default_to_zero(self):
-        """Missing bytesTx/bytesRx keys default to 0."""
-        links = [{"series": [{"bytesTx": 100}]}]
+    def test_missing_bytesRx_metric_defaults_to_zero(self):
+        """Link with only bytesTx metric has rx default to 0."""
+        links = [{"series": [
+            {"metric": "bytesTx", "data": [100]},
+        ]}]
         result = aggregate_link_samples(links)
         assert result == [{"tx_bytes": 100, "rx_bytes": 0}]
 
@@ -178,14 +238,225 @@ class TestAggregateLinkSamples:
     def test_multiple_samples_multiple_links(self):
         """Two links with 2 samples each aggregate correctly."""
         links = [
-            {"series": [{"bytesTx": 10, "bytesRx": 20}, {"bytesTx": 30, "bytesRx": 40}]},
-            {"series": [{"bytesTx": 5, "bytesRx": 6}, {"bytesTx": 7, "bytesRx": 8}]},
+            {"series": [
+                {"metric": "bytesTx", "data": [10, 30]},
+                {"metric": "bytesRx", "data": [20, 40]},
+            ]},
+            {"series": [
+                {"metric": "bytesTx", "data": [5, 7]},
+                {"metric": "bytesRx", "data": [6, 8]},
+            ]},
         ]
         result = aggregate_link_samples(links)
         assert result == [
             {"tx_bytes": 15, "rx_bytes": 26},
             {"tx_bytes": 37, "rx_bytes": 48},
         ]
+
+    def test_none_values_in_data_treated_as_zero(self):
+        """None values in data arrays are treated as 0, not causing TypeError."""
+        links = [{"series": [
+            {"metric": "bytesTx", "data": [100, None, 200]},
+            {"metric": "bytesRx", "data": [None, 300, None]},
+        ]}]
+        result = aggregate_link_samples(links)
+        assert result == [
+            {"tx_bytes": 100, "rx_bytes": 0},
+            {"tx_bytes": 0, "rx_bytes": 300},
+            {"tx_bytes": 200, "rx_bytes": 0},
+        ]
+
+    def test_all_none_data_produces_zeros(self):
+        """An array of all None values produces zero-byte samples."""
+        links = [{"series": [
+            {"metric": "bytesTx", "data": [None, None]},
+            {"metric": "bytesRx", "data": [None, None]},
+        ]}]
+        result = aggregate_link_samples(links)
+        assert result == [
+            {"tx_bytes": 0, "rx_bytes": 0},
+            {"tx_bytes": 0, "rx_bytes": 0},
+        ]
+
+
+# ── validate_sample_count ─────────────────────────────────────────────────
+
+
+class TestValidateSampleCount:
+    """Tests for sample count validation."""
+
+    def test_exact_match_valid(self):
+        """Data length exactly matching expected is valid."""
+        links = [{"linkId": 1, "series": [
+            {"metric": "bytesTx", "data": [0] * 8928},
+            {"metric": "bytesRx", "data": [0] * 8928},
+        ]}]
+        result = validate_sample_count(links, 8928)
+        assert result["valid"] is True
+        assert result["expected"] == 8928
+        assert all(d["ok"] for d in result["links"])
+
+    def test_plus_one_tolerance(self):
+        """Data length of expected+1 is tolerated."""
+        links = [{"linkId": 1, "series": [
+            {"metric": "bytesTx", "data": [0] * 8929},
+            {"metric": "bytesRx", "data": [0] * 8928},
+        ]}]
+        result = validate_sample_count(links, 8928)
+        assert result["valid"] is True
+
+    def test_minus_one_tolerance(self):
+        """Data length of expected-1 is tolerated."""
+        links = [{"linkId": 1, "series": [
+            {"metric": "bytesTx", "data": [0] * 8927},
+            {"metric": "bytesRx", "data": [0] * 8928},
+        ]}]
+        result = validate_sample_count(links, 8928)
+        assert result["valid"] is True
+
+    def test_beyond_tolerance_invalid(self):
+        """Data length off by more than 1 is invalid."""
+        links = [{"linkId": 1, "series": [
+            {"metric": "bytesTx", "data": [0] * 8900},
+            {"metric": "bytesRx", "data": [0] * 8928},
+        ]}]
+        result = validate_sample_count(links, 8928)
+        assert result["valid"] is False
+        tx_detail = next(d for d in result["links"] if d["metric"] == "bytesTx")
+        assert tx_detail["ok"] is False
+        assert tx_detail["actual"] == 8900
+        assert tx_detail["diff"] == -28
+
+    def test_strict_raises_on_failure(self):
+        """strict=True raises ValueError when validation fails."""
+        links = [{"linkId": 42, "series": [
+            {"metric": "bytesTx", "data": [0] * 100},
+        ]}]
+        with pytest.raises(ValueError, match="link 42"):
+            validate_sample_count(links, 8928, strict=True)
+
+    def test_strict_no_raise_on_success(self):
+        """strict=True does not raise when validation passes."""
+        links = [{"linkId": 1, "series": [
+            {"metric": "bytesTx", "data": [0] * 8928},
+        ]}]
+        result = validate_sample_count(links, 8928, strict=True)
+        assert result["valid"] is True
+
+    def test_multi_link(self):
+        """Multiple links each contribute detail entries."""
+        links = [
+            {"linkId": 10, "series": [
+                {"metric": "bytesTx", "data": [0] * 8928},
+                {"metric": "bytesRx", "data": [0] * 8928},
+            ]},
+            {"linkId": 20, "series": [
+                {"metric": "bytesTx", "data": [0] * 8928},
+                {"metric": "bytesRx", "data": [0] * 8928},
+            ]},
+        ]
+        result = validate_sample_count(links, 8928)
+        assert result["valid"] is True
+        assert len(result["links"]) == 4
+
+    def test_empty_link_list(self):
+        """Empty link list is considered valid (nothing to fail)."""
+        result = validate_sample_count([], 8928)
+        assert result["valid"] is True
+        assert result["links"] == []
+
+    def test_link_without_series(self):
+        """Link missing 'series' key produces no detail entries."""
+        result = validate_sample_count([{"linkId": 1}], 8928)
+        assert result["valid"] is True
+        assert result["links"] == []
+
+
+# ── compute_daily_p95s ────────────────────────────────────────────────────
+
+
+class TestComputeDailyP95s:
+    """Tests for per-day P95 computation."""
+
+    JULY_START_MS = int(datetime(2026, 7, 1, tzinfo=timezone.utc).timestamp() * 1000)
+
+    def test_empty_link_series_returns_empty(self):
+        """Empty link_series_result returns empty list."""
+        assert compute_daily_p95s([], 0) == []
+
+    def test_single_day_288_samples(self):
+        """288 identical samples (1 full day) produce one daily entry."""
+        links = [{"series": [
+            {"metric": "bytesTx", "data": [1_048_576] * 288},
+            {"metric": "bytesRx", "data": [2_097_152] * 288},
+        ]}]
+        result = compute_daily_p95s(links, self.JULY_START_MS)
+        assert len(result) == 1
+        assert result[0]["date"] == date(2026, 7, 1)
+        assert result[0]["sample_count"] == 288
+        assert result[0]["tx_p95"] == pytest.approx(8 / 300)
+        assert result[0]["rx_p95"] == pytest.approx(16 / 300)
+        assert result[0]["total_p95"] == pytest.approx(24 / 300)
+
+    def test_daily_p95_picks_correct_rank(self):
+        """288 ramping samples select the 274th-largest value (ceil(288 * 0.95))."""
+        # Samples 1..288 as raw byte counts; P95 position = ceil(288*0.95) = 274
+        tx_data = [i * BYTES_PER_SAMPLE_1MBPS for i in range(1, 289)]  # i Mbps each
+        rx_data = [i * BYTES_PER_SAMPLE_1MBPS for i in range(1, 289)]
+        links = [{"series": [
+            {"metric": "bytesTx", "data": tx_data},
+            {"metric": "bytesRx", "data": rx_data},
+        ]}]
+        result = compute_daily_p95s(links, self.JULY_START_MS)
+        assert len(result) == 1
+        # sorted values are 1..288 Mbps; position 274 (1-indexed) = 274 Mbps
+        assert result[0]["tx_p95"] == pytest.approx(274.0)
+        assert result[0]["rx_p95"] == pytest.approx(274.0)
+        # total = bytes_to_mbps(tx_bytes + rx_bytes) = 2 * i Mbps; P95 = 2 * 274
+        assert result[0]["total_p95"] == pytest.approx(548.0)
+
+    def test_two_days_sorted_by_date(self):
+        """576 samples spanning 2 days produce two entries in date order."""
+        links = [{"series": [
+            {"metric": "bytesTx", "data": [1_048_576] * 288 + [2_097_152] * 288},
+            {"metric": "bytesRx", "data": [0] * 576},
+        ]}]
+        result = compute_daily_p95s(links, self.JULY_START_MS)
+        assert len(result) == 2
+        assert result[0]["date"] == date(2026, 7, 1)
+        assert result[1]["date"] == date(2026, 7, 2)
+        assert result[0]["tx_p95"] == pytest.approx(8 / 300)
+        assert result[1]["tx_p95"] == pytest.approx(16 / 300)
+
+    def test_result_keys(self):
+        """Each daily entry has the expected keys."""
+        links = [{"series": [
+            {"metric": "bytesTx", "data": [100]},
+            {"metric": "bytesRx", "data": [200]},
+        ]}]
+        result = compute_daily_p95s(links, self.JULY_START_MS)
+        assert len(result) == 1
+        assert set(result[0].keys()) == {
+            "date", "sample_count", "tx_p95", "rx_p95", "total_p95",
+        }
+
+    def test_consistent_with_monthly_pipeline(self):
+        """Daily P95s fed into monthly calc match compute_edge_month_metrics."""
+        links = [{"series": [
+            {"metric": "bytesTx", "data": [1_048_576] * 288 + [2_097_152] * 288},
+            {"metric": "bytesRx", "data": [500_000] * 576},
+        ]}]
+        daily = compute_daily_p95s(links, self.JULY_START_MS)
+        monthly = compute_edge_month_metrics(links, self.JULY_START_MS)
+
+        all_tx = [d["tx_p95"] for d in daily]
+        assert monthly["monthly_tx_95th_mbps"] == pytest.approx(
+            percentile_95(all_tx)
+        )
+        assert monthly["monthly_tx_max_mbps"] == pytest.approx(max(all_tx))
+        assert monthly["monthly_tx_avg_mbps"] == pytest.approx(
+            sum(all_tx) / len(all_tx)
+        )
 
 
 # ── compute_edge_month_metrics ─────────────────────────────────────────────
@@ -215,9 +486,10 @@ class TestComputeEdgeMonthMetrics:
     def test_uniform_data_288_samples(self):
         """288 identical samples (1 day) with known byte values."""
         # 288 samples = 1 full day of 5-minute intervals
-        links = [
-            {"series": [{"bytesTx": 1_048_576, "bytesRx": 2_097_152}] * 288}
-        ]
+        links = [{"series": [
+            {"metric": "bytesTx", "data": [1_048_576] * 288},
+            {"metric": "bytesRx", "data": [2_097_152] * 288},
+        ]}]
         result = compute_edge_month_metrics(links, self.JULY_START_MS)
         # All samples identical -> p95/max/avg of identical values = that value
         assert result["monthly_tx_95th_mbps"] == pytest.approx(8 / 300)
@@ -232,16 +504,20 @@ class TestComputeEdgeMonthMetrics:
 
     def test_total_is_from_raw_bytes_not_sum_of_converted(self):
         """total_mbps is bytes_to_mbps(tx_bytes + rx_bytes), not tx_mbps + rx_mbps."""
-        # With single sample, result should be bytes_to_mbps(tx + rx)
-        links = [{"series": [{"bytesTx": 1_048_576, "bytesRx": 2_097_152}]}]
+        links = [{"series": [
+            {"metric": "bytesTx", "data": [1_048_576]},
+            {"metric": "bytesRx", "data": [2_097_152]},
+        ]}]
         result = compute_edge_month_metrics(links, self.JULY_START_MS)
-        # bytes_to_mbps(1_048_576 + 2_097_152) = bytes_to_mbps(3_145_728)
         expected_total = 3_145_728 * 8 / 1_048_576 / 300
         assert result["monthly_total_95th_mbps"] == pytest.approx(expected_total)
 
     def test_result_has_nine_keys(self):
         """Result dict has exactly the nine expected metric keys."""
-        links = [{"series": [{"bytesTx": 100, "bytesRx": 200}]}]
+        links = [{"series": [
+            {"metric": "bytesTx", "data": [100]},
+            {"metric": "bytesRx", "data": [200]},
+        ]}]
         result = compute_edge_month_metrics(links, self.JULY_START_MS)
         assert set(result.keys()) == {
             "monthly_tx_95th_mbps",
@@ -260,9 +536,10 @@ class TestComputeEdgeMonthMetrics:
         # 576 samples = 2 full days
         # Day 1: 288 samples at 1_048_576 tx bytes -> tx_mbps = 8/300
         # Day 2: 288 samples at 2_097_152 tx bytes -> tx_mbps = 16/300
-        day1 = [{"bytesTx": 1_048_576, "bytesRx": 0}] * 288
-        day2 = [{"bytesTx": 2_097_152, "bytesRx": 0}] * 288
-        links = [{"series": day1 + day2}]
+        links = [{"series": [
+            {"metric": "bytesTx", "data": [1_048_576] * 288 + [2_097_152] * 288},
+            {"metric": "bytesRx", "data": [0] * 576},
+        ]}]
         result = compute_edge_month_metrics(links, self.JULY_START_MS)
         # Day 1 p95 = 8/300 (all identical), Day 2 p95 = 16/300 (all identical)
         # Monthly p95 of [8/300, 16/300] -> ceil(2 * 0.95) = 2 -> second value = 16/300
@@ -276,3 +553,155 @@ class TestComputeEdgeMonthMetrics:
         assert result["monthly_rx_avg_mbps"] == 0.0
         assert result["monthly_total_max_mbps"] == pytest.approx(16 / 300)
         assert result["monthly_total_avg_mbps"] == pytest.approx(12 / 300)
+
+    def test_three_link_full_month_with_sample_validation(self):
+        """3 links over a full July (31 days, 8928 samples) validates count and p95.
+
+        Mirrors a real VCO response with:
+        - Link 1 (Spectrum Business): active, ~3.8 MB/sample rx, ~2.3 MB/sample tx
+        - Link 2 (Starlink): backup, mostly zero with occasional bursts
+        - Link 3 (Hawaiian Telcom): active, ~2.0 MB/sample rx, ~3.3 MB/sample tx
+        """
+        expected = max_samples_for_month(2026, 7)
+        assert expected == 8928
+
+        n = 288  # samples per day
+        days = 31
+
+        # Link 1: steady traffic, slight daily ramp
+        link1_rx = []
+        link1_tx = []
+        for d in range(days):
+            link1_rx.extend([3_800_000 + d * 5_000] * n)
+            link1_tx.extend([2_300_000 + d * 3_000] * n)
+
+        # Link 2: backup, all zeros except a burst on day 15
+        link2_rx = [0] * expected
+        link2_tx = [0] * expected
+        burst_idx = 15 * n + 144  # midday on day 15
+        link2_rx[burst_idx] = 8_000_000
+        link2_tx[burst_idx] = 22_000_000
+
+        # Link 3: steady traffic, slight daily ramp
+        link3_rx = []
+        link3_tx = []
+        for d in range(days):
+            link3_rx.extend([2_000_000 + d * 2_000] * n)
+            link3_tx.extend([3_300_000 + d * 4_000] * n)
+
+        links = [
+            {"linkId": 532, "series": [
+                {"metric": "bytesRx", "startTime": self.JULY_START_MS, "tickInterval": 300000, "data": link1_rx},
+                {"metric": "bytesTx", "startTime": self.JULY_START_MS, "tickInterval": 300000, "data": link1_tx},
+            ]},
+            {"linkId": 533, "series": [
+                {"metric": "bytesRx", "startTime": self.JULY_START_MS, "tickInterval": 300000, "data": link2_rx},
+                {"metric": "bytesTx", "startTime": self.JULY_START_MS, "tickInterval": 300000, "data": link2_tx},
+            ]},
+            {"linkId": 534, "series": [
+                {"metric": "bytesRx", "startTime": self.JULY_START_MS, "tickInterval": 300000, "data": link3_rx},
+                {"metric": "bytesTx", "startTime": self.JULY_START_MS, "tickInterval": 300000, "data": link3_tx},
+            ]},
+        ]
+
+        # Validate sample counts match expected maxSamples
+        validation = validate_sample_count(links, expected)
+        assert validation["valid"] is True
+        assert validation["expected"] == 8928
+        assert len(validation["links"]) == 6  # 3 links × 2 metrics each
+        for detail in validation["links"]:
+            assert detail["ok"] is True
+            assert detail["actual"] == 8928
+
+        # strict mode should also pass
+        validate_sample_count(links, expected, strict=True)
+
+        # Compute metrics
+        result = compute_edge_month_metrics(links, self.JULY_START_MS)
+
+        assert result["monthly_tx_95th_mbps"] > 0
+        assert result["monthly_rx_95th_mbps"] > 0
+        assert result["monthly_total_95th_mbps"] > 0
+
+        # Day 30 (index 30, last day) has the highest steady traffic
+        # Link 1 rx: 3_800_000 + 30*5_000 = 3_950_000
+        # Link 3 rx: 2_000_000 + 30*2_000 = 2_060_000
+        # Day 30 agg rx = 3_950_000 + 0 + 2_060_000 = 6_010_000
+        day30_rx = 3_950_000 + 2_060_000
+        day30_rx_mbps = bytes_to_mbps(day30_rx)
+
+        # Link 1 tx: 2_300_000 + 30*3_000 = 2_390_000
+        # Link 3 tx: 3_300_000 + 30*4_000 = 3_420_000
+        # Day 30 agg tx = 2_390_000 + 0 + 3_420_000 = 5_810_000
+        day30_tx = 2_390_000 + 3_420_000
+        day30_tx_mbps = bytes_to_mbps(day30_tx)
+
+        # Monthly p95 of 31 daily p95s: ceil(31 * 0.95) = 30 → 30th sorted value
+        # Days are ramping up, so sorted daily p95s = day0..day30
+        # 30th value (1-indexed) = day 29 (0-indexed)
+        day29_rx = (3_800_000 + 29 * 5_000) + (2_000_000 + 29 * 2_000)
+        day29_tx = (2_300_000 + 29 * 3_000) + (3_300_000 + 29 * 4_000)
+        assert result["monthly_rx_95th_mbps"] == pytest.approx(bytes_to_mbps(day29_rx))
+        assert result["monthly_tx_95th_mbps"] == pytest.approx(bytes_to_mbps(day29_tx))
+
+        # Max should be day 30 (highest ramp)
+        assert result["monthly_rx_max_mbps"] == pytest.approx(day30_rx_mbps)
+        assert result["monthly_tx_max_mbps"] == pytest.approx(day30_tx_mbps)
+
+
+# ── diagnose_edge_metrics ─────────────────────────────────────────────────
+
+
+class TestDiagnoseEdgeMetrics:
+    """Tests for the diagnostic analysis function."""
+
+    def test_diagnose_healthy_data(self):
+        """Returns expected structure for normal data with non-zero traffic."""
+        links = [{"linkId": 10, "series": [
+            {"metric": "bytesTx", "data": [100, 200]},
+            {"metric": "bytesRx", "data": [300, 400]},
+        ]}]
+        result = diagnose_edge_metrics(links)
+        assert result["link_count"] == 1
+        assert len(result["links"]) == 1
+        assert result["links"][0]["link_id"] == 10
+        assert len(result["links"][0]["metrics"]) == 2
+        tx_metric = result["links"][0]["metrics"][0]
+        assert tx_metric["name"] == "bytesTx"
+        assert tx_metric["samples"] == 2
+        assert tx_metric["none_count"] == 0
+        assert tx_metric["zero_count"] == 0
+        assert result["total_samples_after_aggregation"] == 2
+        assert result["all_zero"] is False
+
+    def test_diagnose_with_none_values(self):
+        """Correctly reports None counts in data arrays."""
+        links = [{"linkId": 5, "series": [
+            {"metric": "bytesTx", "data": [100, None, None]},
+            {"metric": "bytesRx", "data": [None, 200, None]},
+        ]}]
+        result = diagnose_edge_metrics(links)
+        tx_metric = result["links"][0]["metrics"][0]
+        rx_metric = result["links"][0]["metrics"][1]
+        assert tx_metric["none_count"] == 2
+        assert rx_metric["none_count"] == 2
+        assert result["total_samples_after_aggregation"] == 3
+        assert result["all_zero"] is False
+
+    def test_diagnose_empty_series(self):
+        """Handles empty input gracefully."""
+        result = diagnose_edge_metrics([])
+        assert result["link_count"] == 0
+        assert result["links"] == []
+        assert result["total_samples_after_aggregation"] == 0
+        assert result["all_zero"] is True
+
+    def test_diagnose_all_zero_data(self):
+        """Reports all_zero=True when every sample is zero."""
+        links = [{"linkId": 1, "series": [
+            {"metric": "bytesTx", "data": [0, 0]},
+            {"metric": "bytesRx", "data": [0, 0]},
+        ]}]
+        result = diagnose_edge_metrics(links)
+        assert result["all_zero"] is True
+        assert result["links"][0]["metrics"][0]["zero_count"] == 2
