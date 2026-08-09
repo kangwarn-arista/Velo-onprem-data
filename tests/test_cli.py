@@ -67,11 +67,33 @@ def test_diagnose_flag():
     assert args.diagnose == "WKEPRTR01"
 
 
+def test_last_30_days_default_false():
+    """parse_args([]) yields last_30_days=False."""
+    parser = build_parser()
+    args = parser.parse_args([])
+    assert args.last_30_days is False
+
+
+def test_last_30_days_flag():
+    """parse_args(["--last_30_days"]) yields last_30_days=True."""
+    parser = build_parser()
+    args = parser.parse_args(["--last_30_days"])
+    assert args.last_30_days is True
+
+
+def test_last_30_days_with_months_rejected():
+    """parse_args(["--last_30_days", "--months", "3"]) raises SystemExit (mutually exclusive)."""
+    parser = build_parser()
+    with pytest.raises(SystemExit):
+        parser.parse_args(["--last_30_days", "--months", "3"])
+
+
 def test_help_contains_flags():
-    """parser.format_help() contains --collect_95th, --months, --strict_validation, and --diagnose."""
+    """parser.format_help() contains all expected flags."""
     parser = build_parser()
     help_text = parser.format_help()
     assert "--collect_95th" in help_text
     assert "--months" in help_text
     assert "--strict_validation" in help_text
     assert "--diagnose" in help_text
+    assert "--last_30_days" in help_text
