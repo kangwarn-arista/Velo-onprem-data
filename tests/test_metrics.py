@@ -19,6 +19,7 @@ from metrics import (
     compute_daily_p95s,
     compute_edge_month_metrics,
     diagnose_edge_metrics,
+    get_last_30_days,
     get_target_months,
     max_samples_for_month,
     percentile_95,
@@ -705,3 +706,63 @@ class TestDiagnoseEdgeMetrics:
         result = diagnose_edge_metrics(links)
         assert result["all_zero"] is True
         assert result["links"][0]["metrics"][0]["zero_count"] == 2
+
+
+# ── get_last_30_days ──────────────────────────────────────────────────────
+
+
+class TestGetLast30Days:
+    """Tests for the trailing-30-day time window."""
+
+    def test_returns_single_element_list(self):
+        result = get_last_30_days(reference_date=date(2026, 8, 8))
+        assert isinstance(result, list)
+        assert len(result) == 1
+
+    def test_label_is_last30d(self):
+        result = get_last_30_days(reference_date=date(2026, 8, 8))
+        assert result[0]["label"] == "last30d"
+
+    def test_has_all_expected_keys(self):
+        result = get_last_30_days(reference_date=date(2026, 8, 8))
+        entry = result[0]
+        assert "year" in entry
+        assert "month" in entry
+        assert "start_ms" in entry
+        assert "end_ms" in entry
+        assert "label" in entry
+
+    def test_window_spans_30_days(self):
+        ref = date(2026, 8, 8)
+        result = get_last_30_days(reference_date=ref)
+        entry = result[0]
+        duration_ms = entry["end_ms"] - entry["start_ms"]
+        assert duration_ms == 30 * 24 * 60 * 60 * 1000
+
+    def test_end_is_midnight_after_reference(self):
+        ref = date(2026, 8, 8)
+        result = get_last_30_days(reference_date=ref)
+        entry = result[0]
+        expected_end = datetime(2026, 8, 9, tzinfo=timezone.utc)
+        assert entry["end_ms"] == int(expected_end.timestamp() * 1000)
+
+    def test_start_is_30_days_before_end(self):
+        ref = date(2026, 8, 8)
+        result = get_last_30_days(reference_date=ref)
+        entry = result[0]
+        expected_start = datetime(2026, 7, 10, tzinfo=timezone.utc)
+        assert entry["start_ms"] == int(expected_start.timestamp() * 1000)
+
+    def test_year_and_month_match_reference(self):
+        ref = date(2026, 8, 8)
+        result = get_last_30_days(reference_date=ref)
+        entry = result[0]
+        assert entry["year"] == 2026
+        assert entry["month"] == 8
+
+    def test_defaults_to_today(self):
+        result = get_last_30_days()
+        entry = result[0]
+        today = date.today()
+        assert entry["year"] == today.year
+        assert entry["month"] == today.month
