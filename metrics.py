@@ -5,9 +5,12 @@ Provides month range calculation, bytes-to-Mbps conversion,
 and the full edge-month metrics pipeline.  Uses only Python
 stdlib -- no third-party dependencies.
 """
+import calendar
 import math
 from collections import defaultdict
 from datetime import date, datetime, timezone
+
+SAMPLES_PER_DAY = 288  # 12 samples/hr × 24 hrs (5-minute intervals)
 
 
 def get_target_months(
@@ -72,6 +75,23 @@ def get_target_months(
     return months
 
 
+def max_samples_for_month(year: int, month: int) -> int:
+    """Return the expected number of 5-minute samples in a calendar month.
+
+    Computed as ``days_in_month × 288``.  Handles leap-year February
+    automatically via :func:`calendar.monthrange`.
+
+    Args:
+        year: Calendar year (e.g. 2026).
+        month: Calendar month (1–12).
+
+    Returns:
+        The sample count.  Maximum possible value is 8928 (31 × 288).
+    """
+    _, days = calendar.monthrange(year, month)
+    return days * SAMPLES_PER_DAY
+
+
 def bytes_to_mbps(byte_count: int | float) -> float:
     """Convert a 5-minute byte count to megabits per second.
 
@@ -108,40 +128,199 @@ def percentile_95(values: list[float | int]) -> float | int:
     return sorted_vals[position - 1]
 
 
+def _extract_metric_data(series: list[dict], metric_name: str) -> list[int]:
+    """Find a metric object in a link's series list and return its data array.
+
+    The VCO ``metrics/getEdgeLinkSeries`` API returns each link's series
+    as a list of metric objects:
+    ``[{"metric": "bytesTx", "data": [v0, v1, ...]}, {"metric": "bytesRx", ...}]``
+
+    Args:
+        series: The ``"series"`` list from one link in the API response.
+        metric_name: The metric to extract, e.g. ``"bytesTx"`` or ``"bytesRx"``.
+
+    Returns:
+        The ``data`` array for the named metric, or an empty list if not found.
+    """
+    for entry in series:
+        if entry.get("metric") == metric_name:
+            raw = entry.get("data") or []
+            return [v if v is not None else 0 for v in raw]
+    return []
+
+
 def aggregate_link_samples(link_series_result: list[dict]) -> list[dict]:
     """Sum bytesTx and bytesRx across all links at each 5-minute sample index.
 
-    Each element in ``link_series_result`` represents one link and is
-    expected to have a ``"series"`` key containing a list of sample dicts
-    with ``"bytesTx"`` and ``"bytesRx"`` keys.
+    Each element in ``link_series_result`` represents one link and has a
+    ``"series"`` key containing metric objects of the form
+    ``{"metric": "bytesTx", "data": [v0, v1, ...], "total": N}``.
 
     Args:
-        link_series_result: List of link dicts, each with a ``"series"``
-            key mapping to a list of per-sample dicts.
+        link_series_result: List of link dicts from the VCO
+            ``metrics/getEdgeLinkSeries`` API response.
 
     Returns:
         List of dicts with keys ``tx_bytes`` and ``rx_bytes``, one per
         sample index.  Returns an empty list when no series data exists.
     """
-    all_series = [link.get("series") or [] for link in link_series_result]
-    if not all_series:
+    tx_arrays: list[list[int]] = []
+    rx_arrays: list[list[int]] = []
+
+    for link in link_series_result:
+        series = link.get("series") or []
+        tx = _extract_metric_data(series, "bytesTx")
+        rx = _extract_metric_data(series, "bytesRx")
+        if tx:
+            tx_arrays.append(tx)
+        if rx:
+            rx_arrays.append(rx)
+
+    if not tx_arrays and not rx_arrays:
         return []
 
-    max_length = max((len(s) for s in all_series), default=0)
+    max_length = max(
+        (len(a) for a in tx_arrays + rx_arrays), default=0
+    )
     if max_length == 0:
         return []
 
     aggregated: list[dict] = []
     for i in range(max_length):
-        tx_total = 0
-        rx_total = 0
-        for series in all_series:
-            if i < len(series):
-                tx_total += series[i].get("bytesTx", 0)
-                rx_total += series[i].get("bytesRx", 0)
+        tx_total = sum(a[i] for a in tx_arrays if i < len(a))
+        rx_total = sum(a[i] for a in rx_arrays if i < len(a))
         aggregated.append({"tx_bytes": tx_total, "rx_bytes": rx_total})
 
     return aggregated
+
+
+def validate_sample_count(
+    link_series_result: list[dict],
+    expected_samples: int,
+    *,
+    strict: bool = False,
+) -> dict:
+    """Check that each link's data arrays have the expected number of samples.
+
+    Iterates every bytesTx/bytesRx data array in the response and compares
+    its length to ``expected_samples``.  A difference of ±1 is tolerated.
+
+    Args:
+        link_series_result: List of link dicts from the VCO
+            ``metrics/getEdgeLinkSeries`` API response.
+        expected_samples: The ``maxSamples`` value sent in the request.
+        strict: When ``True`` and validation fails, raise :class:`ValueError`.
+            Defaults to ``False`` (return the result dict silently).
+
+    Returns:
+        Dict with keys:
+
+        - ``valid`` (bool): ``True`` if every array is within ±1.
+        - ``expected`` (int): The expected sample count.
+        - ``links`` (list[dict]): Per-array detail with ``link_id``,
+          ``metric``, ``actual``, ``diff``, and ``ok``.
+
+    Raises:
+        ValueError: If ``strict`` is ``True`` and any array falls outside
+            the ±1 tolerance.
+    """
+    details: list[dict] = []
+    all_ok = True
+
+    for link in link_series_result:
+        link_id = link.get("linkId", "unknown")
+        for entry in link.get("series") or []:
+            metric = entry.get("metric", "unknown")
+            data = entry.get("data") or []
+            actual = len(data)
+            diff = actual - expected_samples
+            ok = abs(diff) <= 1
+            if not ok:
+                all_ok = False
+            details.append({
+                "link_id": link_id,
+                "metric": metric,
+                "actual": actual,
+                "diff": diff,
+                "ok": ok,
+            })
+
+    result = {
+        "valid": all_ok,
+        "expected": expected_samples,
+        "links": details,
+    }
+
+    if strict and not all_ok:
+        failures = [d for d in details if not d["ok"]]
+        msg = (
+            f"Sample count validation failed (expected {expected_samples}): "
+            + ", ".join(
+                f"link {f['link_id']} {f['metric']}={f['actual']} (diff={f['diff']})"
+                for f in failures
+            )
+        )
+        raise ValueError(msg)
+
+    return result
+
+
+def compute_daily_p95s(
+    link_series_result: list[dict], start_ms: int
+) -> list[dict]:
+    """Compute per-day P95 bandwidth values from raw link series data.
+
+    Aggregates samples across links, converts to Mbps, groups by UTC
+    calendar day, then computes the 95th percentile for each day.
+
+    Args:
+        link_series_result: List of link dicts from the VCO
+            ``metrics/getEdgeLinkSeries`` API response.
+        start_ms: Start timestamp of the month in UTC milliseconds since
+            epoch.  Used to assign each sample to a calendar day.
+
+    Returns:
+        List of dicts sorted by date, each with keys ``date``
+        (:class:`~datetime.date`), ``sample_count`` (int),
+        ``tx_p95`` (float), ``rx_p95`` (float), ``total_p95`` (float).
+        Returns an empty list when no sample data is available.
+    """
+    samples = aggregate_link_samples(link_series_result)
+    if not samples:
+        return []
+
+    daily_buckets: dict[date, dict[str, list[float]]] = defaultdict(
+        lambda: {"tx": [], "rx": [], "total": []}
+    )
+
+    for i, sample in enumerate(samples):
+        tx_bytes = sample["tx_bytes"]
+        rx_bytes = sample["rx_bytes"]
+
+        tx_mbps = bytes_to_mbps(tx_bytes)
+        rx_mbps = bytes_to_mbps(rx_bytes)
+        total_mbps = bytes_to_mbps(tx_bytes + rx_bytes)
+
+        sample_ts_ms = start_ms + i * 300_000
+        sample_date = datetime.fromtimestamp(
+            sample_ts_ms / 1000, tz=timezone.utc
+        ).date()
+
+        daily_buckets[sample_date]["tx"].append(tx_mbps)
+        daily_buckets[sample_date]["rx"].append(rx_mbps)
+        daily_buckets[sample_date]["total"].append(total_mbps)
+
+    result: list[dict] = []
+    for day in sorted(daily_buckets.keys()):
+        data = daily_buckets[day]
+        result.append({
+            "date": day,
+            "sample_count": len(data["tx"]),
+            "tx_p95": percentile_95(data["tx"]),
+            "rx_p95": percentile_95(data["rx"]),
+            "total_p95": percentile_95(data["total"]),
+        })
+    return result
 
 
 def compute_edge_month_metrics(
@@ -175,41 +354,13 @@ def compute_edge_month_metrics(
         "monthly_total_avg_mbps": 0.0,
     }
 
-    samples = aggregate_link_samples(link_series_result)
-    if not samples:
+    daily_p95s = compute_daily_p95s(link_series_result, start_ms)
+    if not daily_p95s:
         return zero_result
 
-    # Group samples by UTC day
-    daily_buckets: dict[date, dict[str, list[float]]] = defaultdict(
-        lambda: {"tx": [], "rx": [], "total": []}
-    )
-
-    for i, sample in enumerate(samples):
-        tx_bytes = sample["tx_bytes"]
-        rx_bytes = sample["rx_bytes"]
-
-        tx_mbps = bytes_to_mbps(tx_bytes)
-        rx_mbps = bytes_to_mbps(rx_bytes)
-        total_mbps = bytes_to_mbps(tx_bytes + rx_bytes)
-
-        sample_ts_ms = start_ms + i * 300_000
-        sample_date = datetime.fromtimestamp(
-            sample_ts_ms / 1000, tz=timezone.utc
-        ).date()
-
-        daily_buckets[sample_date]["tx"].append(tx_mbps)
-        daily_buckets[sample_date]["rx"].append(rx_mbps)
-        daily_buckets[sample_date]["total"].append(total_mbps)
-
-    # Compute daily p95 values
-    all_daily_tx: list[float] = []
-    all_daily_rx: list[float] = []
-    all_daily_total: list[float] = []
-
-    for day_data in daily_buckets.values():
-        all_daily_tx.append(percentile_95(day_data["tx"]))
-        all_daily_rx.append(percentile_95(day_data["rx"]))
-        all_daily_total.append(percentile_95(day_data["total"]))
+    all_daily_tx = [d["tx_p95"] for d in daily_p95s]
+    all_daily_rx = [d["rx_p95"] for d in daily_p95s]
+    all_daily_total = [d["total_p95"] for d in daily_p95s]
 
     return {
         "monthly_tx_95th_mbps": percentile_95(all_daily_tx),
@@ -221,4 +372,64 @@ def compute_edge_month_metrics(
         "monthly_tx_avg_mbps": sum(all_daily_tx) / len(all_daily_tx),
         "monthly_rx_avg_mbps": sum(all_daily_rx) / len(all_daily_rx),
         "monthly_total_avg_mbps": sum(all_daily_total) / len(all_daily_total),
+    }
+
+
+def diagnose_edge_metrics(link_series_result: list[dict]) -> dict:
+    """Analyze link series data quality for troubleshooting empty or zero metrics.
+
+    Inspects the raw API response structure without modifying it, reporting
+    per-link sample counts, None/zero prevalence, and whether aggregation
+    produces usable data.
+
+    Args:
+        link_series_result: List of link dicts from the VCO
+            ``metrics/getEdgeLinkSeries`` API response.
+
+    Returns:
+        Dict with keys:
+
+        - ``link_count`` (int): Number of links in the response.
+        - ``links`` (list[dict]): Per-link detail with ``link_id``,
+          ``metrics`` (list of dicts with ``name``, ``samples``,
+          ``none_count``, ``zero_count``).
+        - ``total_samples_after_aggregation`` (int): Length of the
+          aggregated sample list.
+        - ``all_zero`` (bool): Whether every aggregated sample has
+          both tx and rx equal to zero.
+    """
+    link_details: list[dict] = []
+
+    for link in link_series_result:
+        link_id = link.get("linkId", "unknown")
+        series = link.get("series") or []
+        metric_details: list[dict] = []
+
+        for entry in series:
+            metric_name = entry.get("metric", "unknown")
+            raw_data = entry.get("data") or []
+            none_count = sum(1 for v in raw_data if v is None)
+            zero_count = sum(1 for v in raw_data if v == 0)
+            metric_details.append({
+                "name": metric_name,
+                "samples": len(raw_data),
+                "none_count": none_count,
+                "zero_count": zero_count,
+            })
+
+        link_details.append({
+            "link_id": link_id,
+            "metrics": metric_details,
+        })
+
+    aggregated = aggregate_link_samples(link_series_result)
+    all_zero = all(
+        s["tx_bytes"] == 0 and s["rx_bytes"] == 0 for s in aggregated
+    ) if aggregated else True
+
+    return {
+        "link_count": len(link_series_result),
+        "links": link_details,
+        "total_samples_after_aggregation": len(aggregated),
+        "all_zero": all_zero,
     }
