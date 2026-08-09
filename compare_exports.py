@@ -111,23 +111,23 @@ def compare(maestro: pd.DataFrame, vco: pd.DataFrame) -> dict:
             diffs.columns = ["Edge UUID", f"Maestro {label}", f"VCO {label}"]
             results["mismatches"].append((label, diffs))
 
-    # Bandwidth: numeric comparison with tolerance
+    # Bandwidth: show all rows, flag those exceeding tolerance
     m_bw_col = _resolve_col(matched, "30 Days 95th", "_maestro")
     v_bw_col = _resolve_col(matched, "monthly_total_95th_mbps", "_vco")
     if m_bw_col and v_bw_col:
         m_bw = pd.to_numeric(matched[m_bw_col], errors="coerce")
         v_bw = pd.to_numeric(matched[v_bw_col], errors="coerce")
-        bw_mask = (m_bw - v_bw).abs() > BW_TOLERANCE_MBPS
         both_valid = m_bw.notna() & v_bw.notna()
-        bw_mask = bw_mask & both_valid
-        if bw_mask.any():
+        if both_valid.any():
             name_col = _resolve_col(matched, "Name", "_maestro") or "Edge Logical ID"
-            bw_diffs = matched[bw_mask][["Edge Logical ID", name_col]].copy()
-            bw_diffs["Maestro 95th"] = m_bw[bw_mask].values
-            bw_diffs["VCO 95th"] = v_bw[bw_mask].round(1).values
-            bw_diffs["Delta"] = (m_bw[bw_mask] - v_bw[bw_mask]).round(1).values
-            bw_diffs.columns = ["Edge UUID", "Edge Name", "Maestro 95th", "VCO 95th", "Delta (Mbps)"]
-            results["bw_diffs"] = bw_diffs
+            bw_all = matched[both_valid][["Edge Logical ID", name_col]].copy()
+            bw_all["Maestro 95th"] = m_bw[both_valid].values
+            bw_all["VCO 95th"] = v_bw[both_valid].round(1).values
+            delta = (m_bw[both_valid] - v_bw[both_valid]).round(1).values
+            bw_all["Delta (Mbps)"] = delta
+            bw_all["Flag"] = [">>>" if abs(d) >= BW_TOLERANCE_MBPS else "" for d in delta]
+            bw_all.columns = ["Edge UUID", "Edge Name", "Maestro 95th", "VCO 95th", "Delta (Mbps)", "Flag"]
+            results["bw_diffs"] = bw_all
 
     return results
 
@@ -171,9 +171,10 @@ def print_report(results: dict, enterprise: str) -> int:
 
     bw_diffs = results["bw_diffs"]
     if not bw_diffs.empty:
-        print(f"\n--- Bandwidth 95th Percentile Differences > {BW_TOLERANCE_MBPS} Mbps ({len(bw_diffs)}) ---")
+        flagged = bw_diffs[bw_diffs["Flag"] == ">>>"]
+        print(f"\n--- Bandwidth 95th Percentile Comparison ({len(bw_diffs)} edges, {len(flagged)} flagged >= {BW_TOLERANCE_MBPS} Mbps) ---")
         print(bw_diffs.to_string(index=False))
-        issue_count += len(bw_diffs)
+        issue_count += len(flagged)
 
     if issue_count == 0:
         print("\n  All edges matched with no field differences.")
