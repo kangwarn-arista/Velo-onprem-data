@@ -399,15 +399,15 @@ def compute_edge_month_metrics(
     all_daily_total = [d["total_p95"] for d in daily_p95s]
 
     return {
-        "monthly_tx_95th_mbps": percentile_95(all_daily_tx),
-        "monthly_rx_95th_mbps": percentile_95(all_daily_rx),
-        "monthly_total_95th_mbps": percentile_95(all_daily_total),
-        "monthly_tx_max_mbps": max(all_daily_tx),
-        "monthly_rx_max_mbps": max(all_daily_rx),
-        "monthly_total_max_mbps": max(all_daily_total),
-        "monthly_tx_avg_mbps": sum(all_daily_tx) / len(all_daily_tx),
-        "monthly_rx_avg_mbps": sum(all_daily_rx) / len(all_daily_rx),
-        "monthly_total_avg_mbps": sum(all_daily_total) / len(all_daily_total),
+        "monthly_tx_95th_mbps": round(percentile_95(all_daily_tx)),
+        "monthly_rx_95th_mbps": round(percentile_95(all_daily_rx)),
+        "monthly_total_95th_mbps": round(percentile_95(all_daily_total)),
+        "monthly_tx_max_mbps": round(max(all_daily_tx)),
+        "monthly_rx_max_mbps": round(max(all_daily_rx)),
+        "monthly_total_max_mbps": round(max(all_daily_total)),
+        "monthly_tx_avg_mbps": round(sum(all_daily_tx) / len(all_daily_tx)),
+        "monthly_rx_avg_mbps": round(sum(all_daily_rx) / len(all_daily_rx)),
+        "monthly_total_avg_mbps": round(sum(all_daily_total) / len(all_daily_total)),
     }
 
 

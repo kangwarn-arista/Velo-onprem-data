@@ -444,18 +444,16 @@ class TestComputeDailyP95s:
     def test_consistent_with_monthly_pipeline(self):
         """Daily P95s fed into monthly calc match compute_edge_month_metrics."""
         links = [{"series": [
-            {"metric": "bytesTx", "data": [1_048_576] * 288 + [2_097_152] * 288},
-            {"metric": "bytesRx", "data": [500_000] * 576},
+            {"metric": "bytesTx", "data": [10 * BYTES_PER_SAMPLE_1MBPS] * 288 + [20 * BYTES_PER_SAMPLE_1MBPS] * 288},
+            {"metric": "bytesRx", "data": [5 * BYTES_PER_SAMPLE_1MBPS] * 576},
         ]}]
         daily = compute_daily_p95s(links, self.JULY_START_MS)
         monthly = compute_edge_month_metrics(links, self.JULY_START_MS)
 
         all_tx = [d["tx_p95"] for d in daily]
-        assert monthly["monthly_tx_95th_mbps"] == pytest.approx(
-            percentile_95(all_tx)
-        )
-        assert monthly["monthly_tx_max_mbps"] == pytest.approx(max(all_tx))
-        assert monthly["monthly_tx_avg_mbps"] == pytest.approx(
+        assert monthly["monthly_tx_95th_mbps"] == round(percentile_95(all_tx))
+        assert monthly["monthly_tx_max_mbps"] == round(max(all_tx))
+        assert monthly["monthly_tx_avg_mbps"] == round(
             sum(all_tx) / len(all_tx)
         )
 
@@ -488,30 +486,30 @@ class TestComputeEdgeMonthMetrics:
         """288 identical samples (1 day) with known byte values."""
         # 288 samples = 1 full day of 5-minute intervals
         links = [{"series": [
-            {"metric": "bytesTx", "data": [1_048_576] * 288},
-            {"metric": "bytesRx", "data": [2_097_152] * 288},
+            {"metric": "bytesTx", "data": [10 * BYTES_PER_SAMPLE_1MBPS] * 288},
+            {"metric": "bytesRx", "data": [20 * BYTES_PER_SAMPLE_1MBPS] * 288},
         ]}]
         result = compute_edge_month_metrics(links, self.JULY_START_MS)
-        # All samples identical -> p95/max/avg of identical values = that value
-        assert result["monthly_tx_95th_mbps"] == pytest.approx(8 / 300)
-        assert result["monthly_rx_95th_mbps"] == pytest.approx(16 / 300)
-        assert result["monthly_total_95th_mbps"] == pytest.approx(24 / 300)
-        assert result["monthly_tx_max_mbps"] == pytest.approx(8 / 300)
-        assert result["monthly_rx_max_mbps"] == pytest.approx(16 / 300)
-        assert result["monthly_total_max_mbps"] == pytest.approx(24 / 300)
-        assert result["monthly_tx_avg_mbps"] == pytest.approx(8 / 300)
-        assert result["monthly_rx_avg_mbps"] == pytest.approx(16 / 300)
-        assert result["monthly_total_avg_mbps"] == pytest.approx(24 / 300)
+        # All samples identical -> p95/max/avg all equal the per-sample value
+        assert result["monthly_tx_95th_mbps"] == 10
+        assert result["monthly_rx_95th_mbps"] == 20
+        assert result["monthly_total_95th_mbps"] == 30
+        assert result["monthly_tx_max_mbps"] == 10
+        assert result["monthly_rx_max_mbps"] == 20
+        assert result["monthly_total_max_mbps"] == 30
+        assert result["monthly_tx_avg_mbps"] == 10
+        assert result["monthly_rx_avg_mbps"] == 20
+        assert result["monthly_total_avg_mbps"] == 30
 
     def test_total_is_from_raw_bytes_not_sum_of_converted(self):
         """total_mbps is bytes_to_mbps(tx_bytes + rx_bytes), not tx_mbps + rx_mbps."""
         links = [{"series": [
-            {"metric": "bytesTx", "data": [1_048_576]},
-            {"metric": "bytesRx", "data": [2_097_152]},
+            {"metric": "bytesTx", "data": [10 * BYTES_PER_SAMPLE_1MBPS]},
+            {"metric": "bytesRx", "data": [20 * BYTES_PER_SAMPLE_1MBPS]},
         ]}]
         result = compute_edge_month_metrics(links, self.JULY_START_MS)
-        expected_total = 3_145_728 * 8 / 1_048_576 / 300
-        assert result["monthly_total_95th_mbps"] == pytest.approx(expected_total)
+        expected_total = round(bytes_to_mbps(30 * BYTES_PER_SAMPLE_1MBPS))
+        assert result["monthly_total_95th_mbps"] == expected_total
 
     def test_result_has_nine_keys(self):
         """Result dict has exactly the nine expected metric keys."""
@@ -535,60 +533,58 @@ class TestComputeEdgeMonthMetrics:
     def test_multi_day_grouping(self):
         """Samples spanning 2 days produce daily p95 values then monthly p95/max/avg."""
         # 576 samples = 2 full days
-        # Day 1: 288 samples at 1_048_576 tx bytes -> tx_mbps = 8/300
-        # Day 2: 288 samples at 2_097_152 tx bytes -> tx_mbps = 16/300
+        # Day 1: 288 samples at 10 Mbps tx, Day 2: 288 samples at 20 Mbps tx
         links = [{"series": [
-            {"metric": "bytesTx", "data": [1_048_576] * 288 + [2_097_152] * 288},
+            {"metric": "bytesTx", "data": [10 * BYTES_PER_SAMPLE_1MBPS] * 288 + [20 * BYTES_PER_SAMPLE_1MBPS] * 288},
             {"metric": "bytesRx", "data": [0] * 576},
         ]}]
         result = compute_edge_month_metrics(links, self.JULY_START_MS)
-        # Day 1 p95 = 8/300 (all identical), Day 2 p95 = 16/300 (all identical)
-        # Monthly p95 of [8/300, 16/300] -> ceil(2 * 0.95) = 2 -> second value = 16/300
-        assert result["monthly_tx_95th_mbps"] == pytest.approx(16 / 300)
-        # max of [8/300, 16/300] = 16/300
-        assert result["monthly_tx_max_mbps"] == pytest.approx(16 / 300)
-        # avg of [8/300, 16/300] = (8/300 + 16/300) / 2 = 12/300
-        assert result["monthly_tx_avg_mbps"] == pytest.approx(12 / 300)
+        # Day 1 p95 = 10, Day 2 p95 = 20
+        # Monthly p95 of [10, 20] -> ceil(2 * 0.95) = 2 -> second value = 20
+        assert result["monthly_tx_95th_mbps"] == 20
+        # max of [10, 20] = 20
+        assert result["monthly_tx_max_mbps"] == 20
+        # avg of [10, 20] = 15
+        assert result["monthly_tx_avg_mbps"] == 15
         # rx bytes are 0 -> all rx and total metrics reflect that
-        assert result["monthly_rx_max_mbps"] == 0.0
-        assert result["monthly_rx_avg_mbps"] == 0.0
-        assert result["monthly_total_max_mbps"] == pytest.approx(16 / 300)
-        assert result["monthly_total_avg_mbps"] == pytest.approx(12 / 300)
+        assert result["monthly_rx_max_mbps"] == 0
+        assert result["monthly_rx_avg_mbps"] == 0
+        assert result["monthly_total_max_mbps"] == 20
+        assert result["monthly_total_avg_mbps"] == 15
 
     def test_three_link_full_month_with_sample_validation(self):
         """3 links over a full July (31 days, 8928 samples) validates count and p95.
 
-        Mirrors a real VCO response with:
-        - Link 1 (Spectrum Business): active, ~3.8 MB/sample rx, ~2.3 MB/sample tx
-        - Link 2 (Starlink): backup, mostly zero with occasional bursts
-        - Link 3 (Hawaiian Telcom): active, ~2.0 MB/sample rx, ~3.3 MB/sample tx
+        Mirrors a real VCO response with realistic traffic scaled to produce
+        integer Mbps values (×1000 from original MB/sample figures).
         """
         expected = max_samples_for_month(2026, 7)
         assert expected == 8928
 
-        n = 288  # samples per day
+        S = 1000  # scale factor for meaningful integer Mbps
+        n = 288   # samples per day
         days = 31
 
         # Link 1: steady traffic, slight daily ramp
         link1_rx = []
         link1_tx = []
         for d in range(days):
-            link1_rx.extend([3_800_000 + d * 5_000] * n)
-            link1_tx.extend([2_300_000 + d * 3_000] * n)
+            link1_rx.extend([S * 3_800_000 + d * S * 5_000] * n)
+            link1_tx.extend([S * 2_300_000 + d * S * 3_000] * n)
 
         # Link 2: backup, all zeros except a burst on day 15
         link2_rx = [0] * expected
         link2_tx = [0] * expected
         burst_idx = 15 * n + 144  # midday on day 15
-        link2_rx[burst_idx] = 8_000_000
-        link2_tx[burst_idx] = 22_000_000
+        link2_rx[burst_idx] = S * 8_000_000
+        link2_tx[burst_idx] = S * 22_000_000
 
         # Link 3: steady traffic, slight daily ramp
         link3_rx = []
         link3_tx = []
         for d in range(days):
-            link3_rx.extend([2_000_000 + d * 2_000] * n)
-            link3_tx.extend([3_300_000 + d * 4_000] * n)
+            link3_rx.extend([S * 2_000_000 + d * S * 2_000] * n)
+            link3_tx.extend([S * 3_300_000 + d * S * 4_000] * n)
 
         links = [
             {"linkId": 532, "series": [
@@ -625,29 +621,23 @@ class TestComputeEdgeMonthMetrics:
         assert result["monthly_total_95th_mbps"] > 0
 
         # Day 30 (index 30, last day) has the highest steady traffic
-        # Link 1 rx: 3_800_000 + 30*5_000 = 3_950_000
-        # Link 3 rx: 2_000_000 + 30*2_000 = 2_060_000
-        # Day 30 agg rx = 3_950_000 + 0 + 2_060_000 = 6_010_000
-        day30_rx = 3_950_000 + 2_060_000
+        day30_rx = S * (3_950_000 + 2_060_000)
         day30_rx_mbps = bytes_to_mbps(day30_rx)
 
-        # Link 1 tx: 2_300_000 + 30*3_000 = 2_390_000
-        # Link 3 tx: 3_300_000 + 30*4_000 = 3_420_000
-        # Day 30 agg tx = 2_390_000 + 0 + 3_420_000 = 5_810_000
-        day30_tx = 2_390_000 + 3_420_000
+        day30_tx = S * (2_390_000 + 3_420_000)
         day30_tx_mbps = bytes_to_mbps(day30_tx)
 
         # Monthly p95 of 31 daily p95s: ceil(31 * 0.95) = 30 → 30th sorted value
         # Days are ramping up, so sorted daily p95s = day0..day30
         # 30th value (1-indexed) = day 29 (0-indexed)
-        day29_rx = (3_800_000 + 29 * 5_000) + (2_000_000 + 29 * 2_000)
-        day29_tx = (2_300_000 + 29 * 3_000) + (3_300_000 + 29 * 4_000)
-        assert result["monthly_rx_95th_mbps"] == pytest.approx(bytes_to_mbps(day29_rx))
-        assert result["monthly_tx_95th_mbps"] == pytest.approx(bytes_to_mbps(day29_tx))
+        day29_rx = S * ((3_800_000 + 29 * 5_000) + (2_000_000 + 29 * 2_000))
+        day29_tx = S * ((2_300_000 + 29 * 3_000) + (3_300_000 + 29 * 4_000))
+        assert result["monthly_rx_95th_mbps"] == round(bytes_to_mbps(day29_rx))
+        assert result["monthly_tx_95th_mbps"] == round(bytes_to_mbps(day29_tx))
 
         # Max should be day 30 (highest ramp)
-        assert result["monthly_rx_max_mbps"] == pytest.approx(day30_rx_mbps)
-        assert result["monthly_tx_max_mbps"] == pytest.approx(day30_tx_mbps)
+        assert result["monthly_rx_max_mbps"] == round(day30_rx_mbps)
+        assert result["monthly_tx_max_mbps"] == round(day30_tx_mbps)
 
 
 # ── diagnose_edge_metrics ─────────────────────────────────────────────────
