@@ -2,6 +2,7 @@ import argparse
 import io
 import json
 import logging
+import sys
 import time
 from datetime import datetime
 import urllib3
@@ -26,8 +27,9 @@ from output import extract_vco_name, write_month_csvs, create_zip_archive
 
 urllib3.disable_warnings(urllib3.exceptions.InsecureRequestWarning)
 
-# Load .env file
-load_dotenv()
+# Load .env file from the directory where the binary/script lives
+_script_dir = os.path.dirname(os.path.abspath(sys.argv[0]))
+load_dotenv(os.path.join(_script_dir, ".env"))
 
 # Read variables from .env
 token = os.getenv("VCO_TOKEN")
@@ -270,12 +272,12 @@ if __name__ == "__main__":
     if not token:
 
         print("ERROR: VCO_TOKEN not found in .env")
-        exit(1)
+        sys.exit(1)
 
     if not vco_url:
 
         print("ERROR: VCO_URL not found in .env")
-        exit(1)
+        sys.exit(1)
 
     token = normalize_token(token)
     print(
@@ -285,7 +287,7 @@ if __name__ == "__main__":
 
     if not args.last_30_days and (args.months < 1 or args.months > 12):
         logging.error("--months must be between 1 and 12, got %d", args.months)
-        exit(1)
+        sys.exit(1)
 
     if args.collect_95th:
         if args.last_30_days:
@@ -299,7 +301,7 @@ if __name__ == "__main__":
         enterprise_ids = get_enterprise_ids()
     except VCOAuthError as e:
         print(f"ERROR: {e}")
-        exit(1)
+        sys.exit(1)
 
     if not enterprise_ids:
         print(
@@ -307,7 +309,7 @@ if __name__ == "__main__":
             "This usually means the API token is invalid, expired, "
             "or lacks permissions. Verify VCO_TOKEN in .env."
         )
-        exit(1)
+        sys.exit(1)
 
     print(f"Found {len(enterprise_ids)} enterprises")
 
@@ -326,7 +328,7 @@ if __name__ == "__main__":
 
     if license_df.empty:
         print("WARNING: No license data available. Cannot produce merged output.")
-        exit(0)
+        sys.exit(0)
 
     if (
         "Customer Name" not in license_df.columns
@@ -336,7 +338,7 @@ if __name__ == "__main__":
             f"ERROR: License CSV missing required column(s) for merge. "
             f"Available: {list(license_df.columns)}"
         )
-        exit(1)
+        sys.exit(1)
 
     edge_status_rows = []
     edge_info_list = []
@@ -452,7 +454,7 @@ if __name__ == "__main__":
             print(f"\nEdge '{target_name}' not found. Available edges:")
             for en in sorted(all_edge_names):
                 print(en)
-            exit(1)
+            sys.exit(1)
 
         print(f"\n{'=' * 60}")
         print(f"DIAGNOSTIC REPORT: {matched_edge['edge_name']}")
@@ -539,7 +541,7 @@ if __name__ == "__main__":
 
         print(f"\n{'=' * 60}")
         print("Diagnostic complete.")
-        exit(0)
+        sys.exit(0)
 
     if args.collect_95th:
         # Deduplicate edge_info_list to prevent fan-out rows in metrics CSVs

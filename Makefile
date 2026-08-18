@@ -75,6 +75,9 @@ nuitka:
 		--standalone \
 		--onefile \
 		--output-filename=$(BINARY_NAME) \
+		--noinclude-pytest-mode=nofollow \
+		--noinclude-unittest-mode=nofollow \
+		--nofollow-import-to='*.tests' \
 		$$FLAGS \
 		$(MAIN_SCRIPT)
 

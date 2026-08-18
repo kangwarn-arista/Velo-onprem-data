@@ -1,4 +1,5 @@
 import json
+import sys
 import time
 import urllib3
 import requests
@@ -14,7 +15,8 @@ import os
 urllib3.disable_warnings(urllib3.exceptions.InsecureRequestWarning)
 requests.packages.urllib3.disable_warnings()
 
-load_dotenv()
+_script_dir = os.path.dirname(os.path.abspath(sys.argv[0]))
+load_dotenv(os.path.join(_script_dir, ".env"))
 
 token = os.getenv("VCO_TOKEN")
 vco_url = os.getenv("VCO_URL")
@@ -304,10 +306,10 @@ if __name__ == "__main__":
 
     if not token:
         print("ERROR: VCO_TOKEN not found in .env")
-        exit(1)
+        sys.exit(1)
     if not vco_url:
         print("ERROR: VCO_URL not found in .env")
-        exit(1)
+        sys.exit(1)
 
     # ── 1. Enterprises ──
     print("Fetching enterprises...")
@@ -315,7 +317,7 @@ if __name__ == "__main__":
         enterprises = get_enterprise_ids()
     except VCOAuthError as e:
         print(f"ERROR: {e}")
-        exit(1)
+        sys.exit(1)
 
     if not enterprises:
         print(
@@ -323,7 +325,7 @@ if __name__ == "__main__":
             "This usually means the API token is invalid, expired, "
             "or lacks permissions. Verify VCO_TOKEN in .env."
         )
-        exit(1)
+        sys.exit(1)
 
     print(f"  Found {len(enterprises)} enterprises")
 
