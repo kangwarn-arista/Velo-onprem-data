@@ -143,10 +143,10 @@ def bytes_to_mbps(byte_count: int | float) -> float:
 
 
 def percentile_95(values: list[float | int]) -> float | int:
-    """Compute the 95th percentile using the ceiling-rank method.
+    """Compute the 95th percentile using the ceil-rank method.
 
     Sorts the values and picks the element at position
-    ``ceil(count * 0.95)`` (1-indexed).
+    ``ceil(count * 0.95)`` (1-indexed, minimum 1).
 
     Args:
         values: Non-empty list of numeric values.
@@ -160,7 +160,7 @@ def percentile_95(values: list[float | int]) -> float | int:
     if not values:
         raise ValueError("Cannot compute percentile of empty list")
     sorted_vals = sorted(values)
-    position = math.ceil(len(sorted_vals) * 0.95)
+    position = max(1, math.ceil(len(sorted_vals) * 0.95))
     return sorted_vals[position - 1]
 
 
@@ -393,9 +393,9 @@ def compute_edge_month_metrics(
     all_daily_total = [d["total_p95"] for d in daily_p95s]
 
     return {
-        "monthly_tx_95th_mbps": round(percentile_95(all_daily_tx)),
-        "monthly_rx_95th_mbps": round(percentile_95(all_daily_rx)),
-        "monthly_total_95th_mbps": round(percentile_95(all_daily_total)),
+        "monthly_tx_95th_mbps": math.ceil(percentile_95(all_daily_tx)),
+        "monthly_rx_95th_mbps": math.ceil(percentile_95(all_daily_rx)),
+        "monthly_total_95th_mbps": math.ceil(percentile_95(all_daily_total)),
     }
 
 

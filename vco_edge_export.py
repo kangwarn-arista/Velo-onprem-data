@@ -33,7 +33,7 @@ load_dotenv(os.path.join(_script_dir, ".env"))
 
 # Read variables from .env
 token = os.getenv("VCO_TOKEN")
-vco_host = os.getenv("VCO_HOST")
+vco_host = os.getenv("VCO_HOST", "localhost")
 vco_url = None
 
 OUTPUT_CSV = "vco_edge_export.csv"
@@ -200,19 +200,17 @@ def get_edge_link_series(
 
 
 def normalize_token(raw_token: str) -> str:
-    """Normalize the VCO API token to ensure it has the required 'Token ' prefix.
+    """Prepend the required 'Token ' prefix for the VCO Authorization header.
 
     Args:
-        raw_token: The token string from the environment variable. May or may
-            not include the 'Token ' prefix.
+        raw_token: The raw API token string from the environment variable.
+            Must not include the 'Token ' prefix.
 
     Returns:
-        The token string with 'Token ' prefix guaranteed.
+        The token string with 'Token ' prefix prepended.
     """
     if not raw_token:
         raise ValueError("raw_token must be a non-empty string")
-    if raw_token.startswith("Token "):
-        return raw_token
     return f"Token {raw_token}"
 
 
@@ -241,8 +239,8 @@ def build_parser() -> argparse.ArgumentParser:
     time_group.add_argument(
         "--months",
         type=int,
-        default=1,
-        help="Number of complete months to collect for 95th percentile metrics.",
+        default=3,
+        help="Number of complete months to collect for 95th percentile metrics (default: 3).",
     )
     time_group.add_argument(
         "--last_30_days",
@@ -283,9 +281,6 @@ if __name__ == "__main__":
     # Resolve host: CLI overrides env
     if args.vco_host:
         vco_host = args.vco_host
-    if not vco_host:
-        print("ERROR: VCO_HOST not found. Set VCO_HOST in .env or use --vco-host.")
-        sys.exit(1)
 
     token = normalize_token(token)
     vco_url = f"https://{vco_host}/portal/"

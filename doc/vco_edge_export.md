@@ -53,12 +53,14 @@ cp .env.example .env
 Edit `.env`:
 
 ```
-VCO_URL=https://<vco-host>/portal/
-VCO_TOKEN=<your-api-token>
+VCO_HOST=<vco-hostname>
+VCO_TOKEN=eyJhbGciOi...
 ```
 
-- **VCO_URL** must point to the VCO portal endpoint (a trailing `/` is added automatically if missing).
-- **VCO_TOKEN** can be provided with or without the `Token ` prefix — the script normalizes it automatically.
+- **VCO_HOST** is the VCO hostname only (e.g. `veco12-kiad1.velocloud.net`). Defaults to `localhost` if not set. The script constructs the full URL (`https://<host>/portal/`) automatically.
+- **VCO_TOKEN** is the raw API token value. Do not include the `Token ` prefix — the script adds it automatically.
+
+Both values can also be supplied via CLI flags (`--vco-host`, `--vco-token`), which override the `.env` values.
 
 > **Note:** SSL verification is disabled (`verify=False`) because on-prem VCO instances typically use self-signed certificates.
 
@@ -66,37 +68,51 @@ VCO_TOKEN=<your-api-token>
 
 #### Basic export
 
-Merges the VCO network-wide license CSV with per-enterprise edge status:
+Merges the VCO network-wide license CSV with per-enterprise edge status, and collects 95th percentile bandwidth metrics for the last 3 complete calendar months (default):
 
 ```bash
 uv run python vco_edge_export.py
 ```
 
-This produces `vco_edge_export.csv` in the current directory.
+This produces `vco_edge_export.csv` plus per-month metrics CSV files and a `.zip` archive.
 
-#### 95th percentile bandwidth metrics
-
-Collect per-edge-link 95th percentile bandwidth metrics for one or more months:
+#### Customizing the time range
 
 ```bash
-# Last 1 complete calendar month (default)
-uv run python vco_edge_export.py --collect_95th
+# Last 1 complete calendar month
+uv run python vco_edge_export.py --months 1
 
-# Last 3 complete calendar months
-uv run python vco_edge_export.py --collect_95th --months 3
+# Last 6 complete calendar months
+uv run python vco_edge_export.py --months 6
 
 # Trailing 30 days (including today) instead of calendar months
-uv run python vco_edge_export.py --collect_95th --last_30_days
+uv run python vco_edge_export.py --last_30_days
 ```
 
-When `--collect_95th` is enabled, the script also produces per-month CSV files and a `.zip` archive (see [Output Files](#output-files)).
+#### Skipping 95th percentile collection
+
+Set the `SKIP_95TH` environment variable to disable metrics collection entirely:
+
+```bash
+SKIP_95TH=1 uv run python vco_edge_export.py
+```
+
+This produces only the basic `vco_edge_export.csv` without any metrics files.
+
+#### CLI overrides for credentials
+
+Override `.env` values directly from the command line:
+
+```bash
+uv run python vco_edge_export.py --vco-host veco12-kiad1.velocloud.net --vco-token "eyJhbGciOi..."
+```
 
 #### Diagnose a specific edge
 
 Print detailed diagnostics (sample counts, null/zero prevalence, daily P95 values, monthly calculations) for a single edge and exit:
 
 ```bash
-uv run python vco_edge_export.py --collect_95th --diagnose "edge-name"
+uv run python vco_edge_export.py --diagnose "edge-name"
 ```
 
 This is useful for troubleshooting when an edge's metrics look wrong or are missing.
@@ -106,36 +122,42 @@ This is useful for troubleshooting when an edge's metrics look wrong or are miss
 By default, sample count mismatches are logged as warnings. To abort on mismatch instead:
 
 ```bash
-uv run python vco_edge_export.py --collect_95th --strict_validation
+uv run python vco_edge_export.py --strict_validation
 ```
 
 ### CLI Reference
 
 | Flag | Type | Default | Description |
 |------|------|---------|-------------|
-| `--collect_95th` | boolean | `False` | Enable 95th percentile bandwidth metrics collection per edge link |
-| `--months N` | int | `1` | Number of complete calendar months to collect (1–12). Mutually exclusive with `--last_30_days` |
+| `--vco-host` | string | `localhost` | VCO hostname (e.g. `veco12-kiad1.velocloud.net`). Overrides `VCO_HOST` in `.env` |
+| `--vco-token` | string | `.env` | VCO API token. Overrides `VCO_TOKEN` in `.env` |
+| `--months N` | int | `3` | Number of complete calendar months to collect (1–12). Mutually exclusive with `--last_30_days` |
 | `--last_30_days` | boolean | `False` | Collect metrics for the trailing 30 days instead of complete calendar months. Mutually exclusive with `--months` |
 | `--strict_validation` | boolean | `False` | Abort on sample count mismatch instead of logging a warning |
 | `--diagnose EDGE_NAME` | string | `None` | Troubleshoot metrics for a specific edge by name. Prints diagnostic output and exits |
 
+| Environment Variable | Description |
+|---------------------|-------------|
+| `VCO_HOST` | VCO hostname, defaults to `localhost` (overridden by `--vco-host`) |
+| `VCO_TOKEN` | VCO API token (overridden by `--vco-token`) |
+| `SKIP_95TH` | Set to `1` to disable 95th percentile metrics collection |
+
 ### Output Files
 
-| Mode | Output | Description |
-|------|--------|-------------|
-| Basic (no flags) | `vco_edge_export.csv` | License data merged with edge status (Edge UUID, Edge Status columns) |
-| `--collect_95th` | `vco_edge_export.csv` | Same as basic |
-| `--collect_95th` | `<vco-name>_metrics_<timestamp>/` | Directory containing per-month CSV files with 95th percentile, max, and avg bandwidth columns |
-| `--collect_95th` | `<vco-name>_metrics_<timestamp>.zip` | Zip archive of the above directory |
+| Condition | Output | Description |
+|-----------|--------|-------------|
+| Always | `vco_edge_export.csv` | License data merged with edge status (Edge UUID, Edge Status columns) |
+| 95th enabled (default) | `<vco-host>_metrics_<timestamp>/` | Directory containing per-month CSV files with P95 bandwidth columns |
+| 95th enabled (default) | `<vco-host>_metrics_<timestamp>.zip` | Zip archive of the above directory |
 | `--diagnose` | *(stdout only)* | Diagnostic report printed to the terminal; no files written |
 
-The per-month CSV files include columns for P95, max, and avg bandwidth in Mbps for tx, rx, and total directions.
+The per-month CSV files include columns for P95 bandwidth in Mbps for tx, rx, and total directions.
 
 ### Error Handling
 
 | Condition | Behavior |
 |-----------|----------|
-| Missing `VCO_TOKEN` or `VCO_URL` | Prints an error and exits immediately |
+| Missing `VCO_TOKEN` | Prints an error and exits immediately |
 | Invalid or expired API token | Detects HTTP 401/403 and JSON-RPC auth errors; exits with a message pointing to the token |
 | Empty enterprise list | Treated as likely auth failure; prints guidance to check credentials |
 | HTTP 429 rate limiting | Automatic retry with backoff (up to 5 attempts, respects `Retry-After` header) |
@@ -147,61 +169,38 @@ The per-month CSV files include columns for P95, max, and avg bandwidth in Mbps 
 
 A self-contained binary bundles Python, all dependencies, and the application code (`vco_edge_export.py`, `metrics.py`, `output.py`) into a single executable. This lets you distribute and run the tool on machines that don't have Python or `uv` installed.
 
+The project includes a `Makefile` that auto-detects all imports and generates the correct build flags for either tool.
+
 ### PyInstaller
 
 PyInstaller is already included as a dev dependency.
 
-#### Install
-
-```bash
-uv sync
-```
-
-This pulls in `pyinstaller` from the dev dependency group.
-
 #### Build
 
 ```bash
-uv run pyinstaller --onefile \
-  --hidden-import=dotenv \
-  --hidden-import=requests \
-  --hidden-import=pandas \
-  --hidden-import=urllib3 \
-  vco_edge_export.py
+make pyinstaller
 ```
 
-The `--hidden-import` flags ensure dynamic imports are included in the bundle.
+This will:
+1. Run `uv sync` to ensure dependencies are installed
+2. Install `pyinstaller` as a dev dependency if not already present
+3. Auto-detect all local and third-party imports from the script
+4. Build a single-file binary
 
 #### Output
-
-The binary is created at:
 
 ```
 dist/vco_edge_export          # macOS / Linux
 dist/vco_edge_export.exe      # Windows
 ```
 
-PyInstaller also creates a `build/` directory and a `vco_edge_export.spec` file. These are build artifacts and can be safely deleted or added to `.gitignore`.
-
-#### Run
-
-```bash
-./dist/vco_edge_export --collect_95th --months 3
-```
-
-All CLI flags work identically to the Python version.
+PyInstaller also creates a `build/` directory and a `vco_edge_export.spec` file. These are build artifacts and can be cleaned up with `make clean`.
 
 ### Nuitka
 
 [Nuitka](https://nuitka.net/) compiles Python to C and produces optimized native binaries. It generally produces smaller binaries with faster startup compared to PyInstaller, at the cost of longer build times.
 
-#### Install
-
-```bash
-uv add --dev nuitka
-```
-
-Nuitka also requires a C compiler on the build machine:
+Nuitka requires a C compiler on the build machine:
 
 - **macOS:** Xcode Command Line Tools (`xcode-select --install`)
 - **Linux:** `gcc` or `clang` (e.g. `apt install gcc`)
@@ -210,19 +209,16 @@ Nuitka also requires a C compiler on the build machine:
 #### Build
 
 ```bash
-uv run python -m nuitka \
-  --standalone \
-  --onefile \
-  --include-module=dotenv \
-  --include-module=requests \
-  --include-module=pandas \
-  --include-module=urllib3 \
-  vco_edge_export.py
+make nuitka
 ```
 
-#### Output
+This will:
+1. Run `uv sync` to ensure dependencies are installed
+2. Install `nuitka` as a dev dependency if not already present
+3. Auto-detect all local and third-party imports from the script
+4. Compile to C and build a single-file binary
 
-The binary is created at:
+#### Output
 
 ```
 vco_edge_export.bin           # Linux
@@ -230,19 +226,21 @@ vco_edge_export.exe           # Windows
 vco_edge_export.app           # macOS (or .bin depending on Nuitka version)
 ```
 
-#### Run
+### Cleaning Build Artifacts
 
 ```bash
-./vco_edge_export.bin --collect_95th --months 3
+make clean
 ```
+
+Removes all build artifacts from both PyInstaller (`build/`, `dist/`, `*.spec`) and Nuitka (`*.build/`, `*.dist/`, `*.onefile-build/`).
 
 ### Common Notes
 
-**The `.env` file is not bundled into the binary.** It must be present in the working directory when you run the binary, just like when running the Python script directly. Copy `.env.example` alongside the binary and fill in your values.
+**The `.env` file is not bundled into the binary.** It must be present in the working directory when you run the binary, or you must pass `--vco-host` and `--vco-token` on the command line.
 
 **Build on the target platform.** A binary built on macOS will not run on Linux or Windows, and vice versa. Build on the same OS (and architecture) where you intend to run it.
 
-**Local modules are bundled automatically.** Both PyInstaller and Nuitka detect that `vco_edge_export.py` imports `metrics.py` and `output.py` and include them in the binary.
+**Local modules are bundled automatically.** The Makefile's import detection walks the full import tree from the main script and includes all local modules (`metrics.py`, `output.py`) and third-party packages.
 
 **Binary size.** Expect roughly 30–80 MB depending on the tool and platform, since pandas and its transitive dependencies are substantial.
 
@@ -250,7 +248,7 @@ vco_edge_export.app           # macOS (or .bin depending on Nuitka version)
 
 | | PyInstaller | Nuitka |
 |---|---|---|
-| Already in dev deps | Yes | No (needs `uv add --dev nuitka`) |
+| Already in dev deps | Yes | No (auto-installed by `make nuitka`) |
 | Build time | Fast (seconds) | Slow (minutes — compiles to C) |
 | Binary size | Larger | Smaller |
 | Startup time | Slower (unpacks to temp dir) | Faster (native execution) |
