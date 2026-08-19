@@ -80,6 +80,7 @@ Aborts on sample count mismatch instead of logging a warning.
 ./vco_edge_export [OPTIONS]
 
 Options:
+  -v, --version            Print version and exit
   --vco-host HOST          VCO hostname (overrides VCO_HOST in .env)
   --vco-token TOKEN        VCO API token (overrides VCO_TOKEN in .env)
   --months N               Months to collect, 1–12 (default: 3)

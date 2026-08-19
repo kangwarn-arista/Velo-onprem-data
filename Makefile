@@ -51,7 +51,7 @@ print(' '.join(parts))
 endef
 export DETECT_IMPORTS
 
-.PHONY: pyinstaller nuitka clean stamp-version
+.PHONY: pyinstaller nuitka clean stamp-version package
 
 stamp-version:
 	@TAG=$$(git describe --tags --abbrev=0 2>/dev/null) && \
@@ -88,6 +88,26 @@ nuitka: stamp-version
 		$$FLAGS \
 		$(MAIN_SCRIPT)
 
+package: clean nuitka
+	@command -v pdflatex >/dev/null 2>&1 || \
+		{ echo "ERROR: pdflatex not found. Install basictex (macOS) or texlive-latex-base (Linux)."; exit 1; } && \
+	TAG=$$(git describe --tags --abbrev=0 2>/dev/null) && \
+	VER=$${TAG#v} && \
+	DIR=$(BINARY_NAME)_v$${VER} && \
+	echo "Packaging v$${VER} into $${DIR}/" && \
+	mkdir -p "$${DIR}" && \
+	cp $(BINARY_NAME) "$${DIR}/" && \
+	pandoc doc/vco_edge_export_binary.md -o "$${DIR}/vco_edge_export_binary.pdf" \
+		--pdf-engine=pdflatex \
+		-V geometry:margin=1in \
+		-V colorlinks=true && \
+	echo "  Created $${DIR}/vco_edge_export_binary.pdf" && \
+	zip -r "$${DIR}.zip" "$${DIR}" && \
+	echo "Package ready: $${DIR}.zip"
+
 clean:
 	rm -rf build/ dist/ *.spec
 	rm -rf *.build/ *.dist/ *.onefile-build/
+	rm -f $(BINARY_NAME)
+	rm -rf $(BINARY_NAME)_v*/
+	rm -f $(BINARY_NAME)_v*.zip

@@ -251,6 +251,11 @@ def build_parser() -> argparse.ArgumentParser:
         description="Export VCO edge and license data with 95th percentile bandwidth metrics."
     )
     parser.add_argument(
+        "-v", "--version",
+        action="version",
+        version=f"%(prog)s {VERSION}",
+    )
+    parser.add_argument(
         "--vco-host",
         type=str,
         default=None,
