@@ -51,9 +51,16 @@ print(' '.join(parts))
 endef
 export DETECT_IMPORTS
 
-.PHONY: pyinstaller nuitka clean
+.PHONY: pyinstaller nuitka clean stamp-version
 
-pyinstaller:
+stamp-version:
+	@TAG=$$(git describe --tags --abbrev=0 2>/dev/null) && \
+	VER=$${TAG#v} && \
+	echo "Stamping version: $$VER" && \
+	sed -i.bak 's/^__version__ = .*/__version__ = "'"$$VER"'"/' $(MAIN_SCRIPT) && \
+	rm -f $(MAIN_SCRIPT).bak
+
+pyinstaller: stamp-version
 	uv sync
 	@uv run python -c "import PyInstaller" 2>/dev/null || uv add --dev pyinstaller
 	@echo "Detecting imports from $(MAIN_SCRIPT)..."
@@ -65,7 +72,7 @@ pyinstaller:
 		$$FLAGS \
 		$(MAIN_SCRIPT)
 
-nuitka:
+nuitka: stamp-version
 	uv sync
 	@uv run python -c "import nuitka" 2>/dev/null || uv add --dev nuitka
 	@echo "Detecting imports from $(MAIN_SCRIPT)..."

@@ -6,6 +6,7 @@ metrics columns, and packaging a directory of CSVs into a zip archive.
 No VCO API credentials are required -- all functions operate on local
 data structures and the filesystem.
 """
+import json
 import zipfile
 from pathlib import Path
 from urllib.parse import urlparse
@@ -131,7 +132,12 @@ def write_month_csvs(
     return csv_paths
 
 
-def create_zip_archive(source_dir: str, zip_path: str) -> str:
+def create_zip_archive(
+    source_dir: str,
+    zip_path: str,
+    *,
+    metadata: dict | None = None,
+) -> str:
     """Package all files in a directory into a single zip archive.
 
     Iterates over all entries in ``source_dir`` using
@@ -142,6 +148,8 @@ def create_zip_archive(source_dir: str, zip_path: str) -> str:
     Args:
         source_dir: Path to the directory containing files to archive.
         zip_path: Destination path for the zip file to create.
+        metadata: Optional dict written as ``_metadata.json`` inside the
+            archive (version, host, generation timestamp, etc.).
 
     Returns:
         The ``zip_path`` string that was passed in.
@@ -150,5 +158,10 @@ def create_zip_archive(source_dir: str, zip_path: str) -> str:
         for file in Path(source_dir).iterdir():
             if file.is_file():
                 zf.write(file, arcname=file.name)
+        if metadata is not None:
+            zf.writestr(
+                "_metadata.json",
+                json.dumps(metadata, indent=2),
+            )
 
     return zip_path

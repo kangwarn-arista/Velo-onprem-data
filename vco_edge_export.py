@@ -1,7 +1,10 @@
+__version__ = "dev"
+
 import argparse
 import io
 import json
 import logging
+import subprocess
 import sys
 import time
 from datetime import datetime
@@ -35,6 +38,30 @@ load_dotenv(os.path.join(_script_dir, ".env"))
 token = os.getenv("VCO_TOKEN")
 vco_host = os.getenv("VCO_HOST", "localhost")
 vco_url = None
+
+def _resolve_version() -> str:
+    """Return version from the nearest git tag, stripping the leading 'v'.
+
+    Falls back to ``__version__`` when git is unavailable (e.g. compiled
+    binary) or the working directory is outside a repository.
+    """
+    try:
+        result = subprocess.run(
+            ["git", "describe", "--tags", "--abbrev=0"],
+            capture_output=True,
+            text=True,
+            timeout=5,
+            cwd=_script_dir,
+        )
+        if result.returncode == 0:
+            tag = result.stdout.strip()
+            return tag.lstrip("v") if tag else __version__
+    except (FileNotFoundError, subprocess.TimeoutExpired, OSError):
+        pass
+    return __version__
+
+
+VERSION = _resolve_version()
 
 OUTPUT_CSV = "vco_edge_export.csv"
 
@@ -277,6 +304,8 @@ if __name__ == "__main__":
     logging.basicConfig(level=logging.INFO, format="%(levelname)s: %(message)s")
 
     args = build_parser().parse_args()
+
+    print(f"vco_edge_export v{VERSION}")
 
     # Resolve token: CLI overrides env
     if args.vco_token:
@@ -637,7 +666,7 @@ if __name__ == "__main__":
             print("No metrics data collected -- skipping output packaging")
         else:
             timestamp = datetime.now().strftime("%Y%m%d_%H%M%S")
-            output_dir = f"{vco_host}_metrics_{timestamp}"
+            output_dir = f"{vco_host}_metrics_v{VERSION}_{timestamp}"
             os.makedirs(output_dir, exist_ok=True)
             csv_paths = write_month_csvs(
                 merged_df, metrics_results, target_months, vco_host, output_dir,
@@ -645,5 +674,16 @@ if __name__ == "__main__":
             )
             print(f"  Wrote {len(csv_paths)} CSV file(s) to {output_dir}/")
             zip_filename = f"{output_dir}.zip"
-            zip_path = create_zip_archive(output_dir, zip_filename)
+            metadata = {
+                "version": VERSION,
+                "vco_host": vco_host,
+                "generated_at": timestamp,
+                "months": args.months if not args.last_30_days else None,
+                "last_30_days": args.last_30_days,
+                "all_metrics": args.all_metrics,
+                "enterprises": len(enterprise_ids),
+                "edges": len(edge_info_list),
+                "edge_month_records": len(metrics_results),
+            }
+            zip_path = create_zip_archive(output_dir, zip_filename, metadata=metadata)
             print(f"Metrics archive created: {zip_path}")
