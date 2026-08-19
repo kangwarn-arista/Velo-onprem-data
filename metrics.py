@@ -375,19 +375,13 @@ def compute_edge_month_metrics(
             epoch.  Used to assign each sample to a calendar day.
 
     Returns:
-        Dict with 9 keys: ``monthly_{tx,rx,total}_{95th,max,avg}_mbps``.
+        Dict with 3 keys: ``monthly_{tx,rx,total}_95th_mbps``.
         All values are 0.0 when no sample data is available.
     """
     zero_result = {
         "monthly_tx_95th_mbps": 0.0,
         "monthly_rx_95th_mbps": 0.0,
         "monthly_total_95th_mbps": 0.0,
-        "monthly_tx_max_mbps": 0.0,
-        "monthly_rx_max_mbps": 0.0,
-        "monthly_total_max_mbps": 0.0,
-        "monthly_tx_avg_mbps": 0.0,
-        "monthly_rx_avg_mbps": 0.0,
-        "monthly_total_avg_mbps": 0.0,
     }
 
     daily_p95s = compute_daily_p95s(link_series_result, start_ms)
@@ -402,12 +396,6 @@ def compute_edge_month_metrics(
         "monthly_tx_95th_mbps": round(percentile_95(all_daily_tx)),
         "monthly_rx_95th_mbps": round(percentile_95(all_daily_rx)),
         "monthly_total_95th_mbps": round(percentile_95(all_daily_total)),
-        "monthly_tx_max_mbps": round(max(all_daily_tx)),
-        "monthly_rx_max_mbps": round(max(all_daily_rx)),
-        "monthly_total_max_mbps": round(max(all_daily_total)),
-        "monthly_tx_avg_mbps": round(sum(all_daily_tx) / len(all_daily_tx)),
-        "monthly_rx_avg_mbps": round(sum(all_daily_rx) / len(all_daily_rx)),
-        "monthly_total_avg_mbps": round(sum(all_daily_total) / len(all_daily_total)),
     }
 
 

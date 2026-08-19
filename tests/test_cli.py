@@ -1,6 +1,6 @@
 """CLI argument parsing tests for vco_edge_export.build_parser.
 
-VCO_TOKEN and VCO_URL are set by conftest.py before this module is imported,
+VCO_TOKEN and VCO_HOST are set by conftest.py before this module is imported,
 so vco_edge_export's module-level os.getenv() calls use test credentials.
 """
 import pytest
@@ -9,19 +9,13 @@ from vco_edge_export import build_parser
 
 
 def test_default_values():
-    """parse_args([]) yields collect_95th=False, months=1, strict_validation=False."""
+    """parse_args([]) yields months=1, strict_validation=False, no overrides."""
     parser = build_parser()
     args = parser.parse_args([])
-    assert args.collect_95th is False
     assert args.months == 1
     assert args.strict_validation is False
-
-
-def test_collect_95th_flag():
-    """parse_args(["--collect_95th"]) yields collect_95th=True."""
-    parser = build_parser()
-    args = parser.parse_args(["--collect_95th"])
-    assert args.collect_95th is True
+    assert args.vco_host is None
+    assert args.vco_token is None
 
 
 def test_months_custom():
@@ -29,14 +23,6 @@ def test_months_custom():
     parser = build_parser()
     args = parser.parse_args(["--months", "3"])
     assert args.months == 3
-
-
-def test_combined_flags():
-    """parse_args(["--collect_95th", "--months", "6"]) yields collect_95th=True, months=6."""
-    parser = build_parser()
-    args = parser.parse_args(["--collect_95th", "--months", "6"])
-    assert args.collect_95th is True
-    assert args.months == 6
 
 
 def test_months_invalid_type():
@@ -88,11 +74,26 @@ def test_last_30_days_with_months_rejected():
         parser.parse_args(["--last_30_days", "--months", "3"])
 
 
+def test_vco_host_flag():
+    """parse_args(["--vco-host", "vco.example.com"]) yields vco_host='vco.example.com'."""
+    parser = build_parser()
+    args = parser.parse_args(["--vco-host", "vco.example.com"])
+    assert args.vco_host == "vco.example.com"
+
+
+def test_vco_token_flag():
+    """parse_args(["--vco-token", "Token abc123"]) yields vco_token='Token abc123'."""
+    parser = build_parser()
+    args = parser.parse_args(["--vco-token", "Token abc123"])
+    assert args.vco_token == "Token abc123"
+
+
 def test_help_contains_flags():
     """parser.format_help() contains all expected flags."""
     parser = build_parser()
     help_text = parser.format_help()
-    assert "--collect_95th" in help_text
+    assert "--vco-host" in help_text
+    assert "--vco-token" in help_text
     assert "--months" in help_text
     assert "--strict_validation" in help_text
     assert "--diagnose" in help_text

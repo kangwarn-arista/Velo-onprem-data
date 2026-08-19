@@ -23,7 +23,7 @@ from metrics import (
     SAMPLES_PER_DAY,
     validate_sample_count,
 )
-from output import extract_vco_name, write_month_csvs, create_zip_archive
+from output import write_month_csvs, create_zip_archive
 
 urllib3.disable_warnings(urllib3.exceptions.InsecureRequestWarning)
 
@@ -33,9 +33,8 @@ load_dotenv(os.path.join(_script_dir, ".env"))
 
 # Read variables from .env
 token = os.getenv("VCO_TOKEN")
-vco_url = os.getenv("VCO_URL")
-if vco_url and not vco_url.endswith("/"):
-    vco_url += "/"
+vco_host = os.getenv("VCO_HOST")
+vco_url = None
 
 OUTPUT_CSV = "vco_edge_export.csv"
 
@@ -221,23 +220,29 @@ def build_parser() -> argparse.ArgumentParser:
     """Build CLI argument parser for VCO edge export.
 
     Returns:
-        argparse.ArgumentParser: Configured parser with --collect_95th and --months flags.
+        argparse.ArgumentParser: Configured parser with --vco-host, --vco-token, and --months flags.
     """
     parser = argparse.ArgumentParser(
-        description="Export VCO edge and license data, with optional 95th percentile bandwidth metrics."
+        description="Export VCO edge and license data with 95th percentile bandwidth metrics."
     )
     parser.add_argument(
-        "--collect_95th",
-        action="store_true",
-        default=False,
-        help="Enable 95th percentile bandwidth metrics collection per edge link.",
+        "--vco-host",
+        type=str,
+        default=None,
+        help="VCO hostname (e.g. veco12-kiad1.velocloud.net). Overrides VCO_HOST in .env.",
+    )
+    parser.add_argument(
+        "--vco-token",
+        type=str,
+        default=None,
+        help="VCO API token. Overrides VCO_TOKEN in .env.",
     )
     time_group = parser.add_mutually_exclusive_group()
     time_group.add_argument(
         "--months",
         type=int,
         default=1,
-        help="Number of complete months to collect for 95th percentile metrics (used with --collect_95th).",
+        help="Number of complete months to collect for 95th percentile metrics.",
     )
     time_group.add_argument(
         "--last_30_days",
@@ -268,34 +273,35 @@ if __name__ == "__main__":
 
     args = build_parser().parse_args()
 
-    # Validate .env variables
+    # Resolve token: CLI overrides env
+    if args.vco_token:
+        token = args.vco_token
     if not token:
-
-        print("ERROR: VCO_TOKEN not found in .env")
+        print("ERROR: VCO_TOKEN not found. Set VCO_TOKEN in .env or use --vco-token.")
         sys.exit(1)
 
-    if not vco_url:
-
-        print("ERROR: VCO_URL not found in .env")
+    # Resolve host: CLI overrides env
+    if args.vco_host:
+        vco_host = args.vco_host
+    if not vco_host:
+        print("ERROR: VCO_HOST not found. Set VCO_HOST in .env or use --vco-host.")
         sys.exit(1)
 
     token = normalize_token(token)
-    print(
-        f"Token format: "
-        f"{'provided with prefix' if os.getenv('VCO_TOKEN').startswith('Token ') else 'bare token, prefix auto-added'}"
-    )
+    vco_url = f"https://{vco_host}/portal/"
 
     if not args.last_30_days and (args.months < 1 or args.months > 12):
         logging.error("--months must be between 1 and 12, got %d", args.months)
         sys.exit(1)
 
-    if args.collect_95th:
+    collect_95th = os.getenv("SKIP_95TH") != "1"
+    if collect_95th:
         if args.last_30_days:
             logging.info("95th percentile collection enabled for last 30 days.")
         else:
             logging.info("95th percentile collection enabled for %d month(s).", args.months)
     else:
-        logging.info("95th percentile collection disabled — standard edge export mode.")
+        logging.info("95th percentile collection disabled.")
 
     try:
         enterprise_ids = get_enterprise_ids()
@@ -362,7 +368,7 @@ if __name__ == "__main__":
                     "Edge Status": edge.get("edgeState", ""),
                 }
             )
-            if args.collect_95th:
+            if collect_95th:
                 edge_id = edge.get("id")
                 if edge_id is not None:
                     edge_info_list.append(
@@ -528,23 +534,16 @@ if __name__ == "__main__":
                           f"{day['total_p95']:>12.4f}")
 
                 metrics = compute_edge_month_metrics(link_series, month["start_ms"])
-                print(f"\n  Monthly calculation (from {len(daily_detail)} daily P95 values):")
-                print(f"    P95  — tx={metrics['monthly_tx_95th_mbps']:.4f}  "
+                print(f"\n  Monthly P95 (from {len(daily_detail)} daily P95 values):")
+                print(f"    tx={metrics['monthly_tx_95th_mbps']:.4f}  "
                       f"rx={metrics['monthly_rx_95th_mbps']:.4f}  "
                       f"total={metrics['monthly_total_95th_mbps']:.4f} Mbps")
-                print(f"    Max  — tx={metrics['monthly_tx_max_mbps']:.4f}  "
-                      f"rx={metrics['monthly_rx_max_mbps']:.4f}  "
-                      f"total={metrics['monthly_total_max_mbps']:.4f} Mbps")
-                print(f"    Avg  — tx={metrics['monthly_tx_avg_mbps']:.4f}  "
-                      f"rx={metrics['monthly_rx_avg_mbps']:.4f}  "
-                      f"total={metrics['monthly_total_avg_mbps']:.4f} Mbps")
 
         print(f"\n{'=' * 60}")
         print("Diagnostic complete.")
         sys.exit(0)
 
-    if args.collect_95th:
-        # Deduplicate edge_info_list to prevent fan-out rows in metrics CSVs
+    if collect_95th:
         seen_edges = set()
         deduped_edge_info_list = []
         for ei in edge_info_list:
@@ -609,16 +608,10 @@ if __name__ == "__main__":
                         f"    {month['label']}: "
                         f"p95 tx={metrics['monthly_tx_95th_mbps']:.4f} "
                         f"rx={metrics['monthly_rx_95th_mbps']:.4f} "
-                        f"total={metrics['monthly_total_95th_mbps']:.4f} | "
-                        f"max tx={metrics['monthly_tx_max_mbps']:.4f} "
-                        f"rx={metrics['monthly_rx_max_mbps']:.4f} "
-                        f"total={metrics['monthly_total_max_mbps']:.4f} | "
-                        f"avg tx={metrics['monthly_tx_avg_mbps']:.4f} "
-                        f"rx={metrics['monthly_rx_avg_mbps']:.4f} "
-                        f"total={metrics['monthly_total_avg_mbps']:.4f} Mbps"
+                        f"total={metrics['monthly_total_95th_mbps']:.4f} Mbps"
                     )
                 except VCOAuthError:
-                    raise  # Auth failures should still terminate
+                    raise
                 except Exception as e:
                     logging.warning(
                         "Failed to collect metrics for edge %s (%s) month %s: %s",
@@ -636,11 +629,10 @@ if __name__ == "__main__":
             print("No metrics data collected -- skipping output packaging")
         else:
             timestamp = datetime.now().strftime("%Y%m%d_%H%M%S")
-            vco_name = extract_vco_name(vco_url)
-            output_dir = f"{vco_name}_metrics_{timestamp}"
+            output_dir = f"{vco_host}_metrics_{timestamp}"
             os.makedirs(output_dir, exist_ok=True)
             csv_paths = write_month_csvs(
-                merged_df, metrics_results, target_months, vco_name, output_dir
+                merged_df, metrics_results, target_months, vco_host, output_dir
             )
             print(f"  Wrote {len(csv_paths)} CSV file(s) to {output_dir}/")
             zip_filename = f"{output_dir}.zip"

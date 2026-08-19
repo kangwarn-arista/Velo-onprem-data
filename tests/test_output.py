@@ -94,12 +94,6 @@ class TestWriteMonthCsvs:
                 "monthly_tx_95th_mbps": 1.5,
                 "monthly_rx_95th_mbps": 2.5,
                 "monthly_total_95th_mbps": 4.0,
-                "monthly_tx_max_mbps": 2.0,
-                "monthly_rx_max_mbps": 3.0,
-                "monthly_total_max_mbps": 5.0,
-                "monthly_tx_avg_mbps": 1.0,
-                "monthly_rx_avg_mbps": 1.8,
-                "monthly_total_avg_mbps": 2.8,
             }
         ]
 
@@ -117,7 +111,7 @@ class TestWriteMonthCsvs:
         assert (tmp_path / "vco.test.com.07-2026.csv").exists()
 
     def test_csv_has_additional_columns(self, tmp_path):
-        """The written CSV contains all merged_df columns plus the 4 additional columns."""
+        """The written CSV contains all merged_df columns plus the p95 columns."""
         merged_df = self._make_merged_df()
         metrics_results = self._make_metrics_results_one()
         target_months = self._make_target_months_one()
@@ -131,13 +125,6 @@ class TestWriteMonthCsvs:
         assert "monthly_tx_95th_mbps" in df.columns
         assert "monthly_rx_95th_mbps" in df.columns
         assert "monthly_total_95th_mbps" in df.columns
-        assert "monthly_tx_max_mbps" in df.columns
-        assert "monthly_rx_max_mbps" in df.columns
-        assert "monthly_total_max_mbps" in df.columns
-        assert "monthly_tx_avg_mbps" in df.columns
-        assert "monthly_rx_avg_mbps" in df.columns
-        assert "monthly_total_avg_mbps" in df.columns
-        # Original merged_df columns must also be present
         for col in merged_df.columns:
             assert col in df.columns
 
@@ -157,7 +144,6 @@ class TestWriteMonthCsvs:
     def test_unmatched_edge_has_nan_metrics(self, tmp_path):
         """An edge with no metrics entry has NaN in all 3 p95 columns."""
         merged_df = self._make_merged_df()
-        # Only edge-01 has metrics; edge-02 does not
         metrics_results = self._make_metrics_results_one()
         target_months = self._make_target_months_one()
 
@@ -171,12 +157,6 @@ class TestWriteMonthCsvs:
         assert pd.isna(unmatched["monthly_tx_95th_mbps"].iloc[0])
         assert pd.isna(unmatched["monthly_rx_95th_mbps"].iloc[0])
         assert pd.isna(unmatched["monthly_total_95th_mbps"].iloc[0])
-        assert pd.isna(unmatched["monthly_tx_max_mbps"].iloc[0])
-        assert pd.isna(unmatched["monthly_rx_max_mbps"].iloc[0])
-        assert pd.isna(unmatched["monthly_total_max_mbps"].iloc[0])
-        assert pd.isna(unmatched["monthly_tx_avg_mbps"].iloc[0])
-        assert pd.isna(unmatched["monthly_rx_avg_mbps"].iloc[0])
-        assert pd.isna(unmatched["monthly_total_avg_mbps"].iloc[0])
 
     def test_two_months_creates_two_csvs(self, tmp_path):
         """write_month_csvs with 2 months returns a list of 2 paths and creates both files."""
@@ -189,12 +169,6 @@ class TestWriteMonthCsvs:
                 "monthly_tx_95th_mbps": 0.5,
                 "monthly_rx_95th_mbps": 0.8,
                 "monthly_total_95th_mbps": 1.3,
-                "monthly_tx_max_mbps": 0.7,
-                "monthly_rx_max_mbps": 1.0,
-                "monthly_total_max_mbps": 1.7,
-                "monthly_tx_avg_mbps": 0.3,
-                "monthly_rx_avg_mbps": 0.5,
-                "monthly_total_avg_mbps": 0.8,
             },
             {
                 "enterprise_name": "Acme Corp",
@@ -203,12 +177,6 @@ class TestWriteMonthCsvs:
                 "monthly_tx_95th_mbps": 1.5,
                 "monthly_rx_95th_mbps": 2.5,
                 "monthly_total_95th_mbps": 4.0,
-                "monthly_tx_max_mbps": 2.0,
-                "monthly_rx_max_mbps": 3.0,
-                "monthly_total_max_mbps": 5.0,
-                "monthly_tx_avg_mbps": 1.0,
-                "monthly_rx_avg_mbps": 1.8,
-                "monthly_total_avg_mbps": 2.8,
             },
         ]
         target_months = [

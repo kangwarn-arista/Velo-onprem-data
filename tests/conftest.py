@@ -1,6 +1,6 @@
 """Shared test configuration.
 
-Sets VCO_TOKEN and VCO_URL environment variables before any test module
+Sets VCO_TOKEN and VCO_HOST environment variables before any test module
 imports vco_edge_export, preventing module-level load_dotenv() and
 os.getenv() from using real credentials.
 
@@ -15,7 +15,7 @@ from unittest.mock import patch
 # so this runs early enough.
 _env_patcher = patch.dict(os.environ, {
     "VCO_TOKEN": "Token test",
-    "VCO_URL": "https://test.example.com/portal/",
+    "VCO_HOST": "test.example.com",
 })
 _env_patcher.start()
 

@@ -59,9 +59,8 @@ def write_month_csvs(
             data.  Must include at least ``"Customer Name"`` and
             ``"Edge Name"`` columns.
         metrics_results: List of dicts, each with keys ``enterprise_name``,
-            ``edge_name``, ``month_label``, ``monthly_{tx,rx,total}_95th_mbps``,
-            ``monthly_{tx,rx,total}_max_mbps``, and
-            ``monthly_{tx,rx,total}_avg_mbps``.
+            ``edge_name``, ``month_label``, and
+            ``monthly_{tx,rx,total}_95th_mbps``.
         target_months: List of month dicts as returned by
             :func:`metrics.get_target_months`, each with a ``"label"`` key
             (format ``"MM-YYYY"``).
@@ -99,29 +98,16 @@ def write_month_csvs(
                     "monthly_tx_95th_mbps",
                     "monthly_rx_95th_mbps",
                     "monthly_total_95th_mbps",
-                    "monthly_tx_max_mbps",
-                    "monthly_rx_max_mbps",
-                    "monthly_total_max_mbps",
-                    "monthly_tx_avg_mbps",
-                    "monthly_rx_avg_mbps",
-                    "monthly_total_avg_mbps",
                 ]
             ]
             month_df = month_df.merge(
                 metrics_df, on=["Customer Name", "Edge Name"], how="left"
             )
         else:
-            # No metrics at all for this month -- add NaN columns
             for col in (
                 "monthly_tx_95th_mbps",
                 "monthly_rx_95th_mbps",
                 "monthly_total_95th_mbps",
-                "monthly_tx_max_mbps",
-                "monthly_rx_max_mbps",
-                "monthly_total_max_mbps",
-                "monthly_tx_avg_mbps",
-                "monthly_rx_avg_mbps",
-                "monthly_total_avg_mbps",
             ):
                 month_df[col] = float("nan")
 

@@ -3,7 +3,7 @@
 These tests call the REAL functions through the vco_edge_export namespace
 (not mocks), confirming that imports resolve and produce correct results.
 
-VCO_TOKEN and VCO_URL are set by conftest.py before this module is imported,
+VCO_TOKEN and VCO_HOST are set by conftest.py before this module is imported,
 so vco_edge_export's module-level os.getenv() calls use test credentials.
 """
 import zipfile
@@ -18,21 +18,13 @@ import vco_edge_export
 
 def test_output_imports_present():
     """Output module functions are importable from the vco_edge_export namespace."""
-    from vco_edge_export import create_zip_archive, extract_vco_name, write_month_csvs
+    from vco_edge_export import create_zip_archive, write_month_csvs
 
-    assert callable(extract_vco_name)
     assert callable(write_month_csvs)
     assert callable(create_zip_archive)
 
 
 # ── real invocation through vco_edge_export namespace ─────────────────────
-
-
-def test_extract_vco_name_returns_hostname_via_namespace():
-    """extract_vco_name called through vco_edge_export returns hostname from vco_url."""
-    result = vco_edge_export.extract_vco_name(vco_edge_export.vco_url)
-    # conftest sets VCO_URL to "https://test.example.com/portal/"
-    assert result == "test.example.com"
 
 
 def test_write_month_csvs_produces_csv_via_namespace(tmp_path):
@@ -48,12 +40,6 @@ def test_write_month_csvs_produces_csv_via_namespace(tmp_path):
             "monthly_tx_95th_mbps": 1.5,
             "monthly_rx_95th_mbps": 2.5,
             "monthly_total_95th_mbps": 4.0,
-            "monthly_tx_max_mbps": 2.0,
-            "monthly_rx_max_mbps": 3.0,
-            "monthly_total_max_mbps": 5.0,
-            "monthly_tx_avg_mbps": 1.0,
-            "monthly_rx_avg_mbps": 1.8,
-            "monthly_total_avg_mbps": 2.8,
         }
     ]
     target_months = [{"label": "07-2026"}]
