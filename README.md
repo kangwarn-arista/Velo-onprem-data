@@ -9,26 +9,26 @@ Python CLI tools that export data from VMware VeloCloud Orchestrator (VCO) on-pr
 Exports edge device and license data by merging the VCO network-wide license CSV export with per-enterprise edge status. Optionally collects 95th percentile bandwidth metrics per edge link.
 
 ```bash
-# Basic export — edges + license data
+# Basic export with 95th percentile bandwidth metrics (last 3 complete months)
 uv run python vco_edge_export.py
 
-# With 95th percentile bandwidth metrics (last 3 complete months)
-uv run python vco_edge_export.py --collect_95th --months 3
-
 # Trailing 30 days instead of complete calendar months
-uv run python vco_edge_export.py --collect_95th --last_30_days
+uv run python vco_edge_export.py --last_30_days
+
+# Include tx and rx columns alongside total in the output
+uv run python vco_edge_export.py --all_metrics
 
 # Diagnose metrics for a specific edge
-uv run python vco_edge_export.py --collect_95th --diagnose "edge-name"
+uv run python vco_edge_export.py --diagnose "edge-name"
 ```
 
 **CLI options:**
 
 | Flag | Description |
 |------|-------------|
-| `--collect_95th` | Enable 95th percentile bandwidth metrics collection per edge link |
-| `--months N` | Number of complete months to collect (used with `--collect_95th`) |
+| `--months N` | Number of complete months to collect (default: 3, range 1–12) |
 | `--last_30_days` | Collect metrics for the trailing 30 days instead of complete calendar months |
+| `--all_metrics` | Include tx and rx columns in addition to total in the output CSVs |
 | `--strict_validation` | Abort on sample count mismatch instead of logging a warning |
 | `--diagnose EDGE_NAME` | Print detailed diagnostic output for a specific edge and exit |
 

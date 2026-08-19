@@ -37,19 +37,38 @@ def extract_vco_name(vco_url: str) -> str:
     return parsed.hostname
 
 
+_ALL_METRIC_COLS = [
+    "monthly_tx_95th_mbps",
+    "monthly_rx_95th_mbps",
+    "monthly_total_95th_mbps",
+]
+
+_COLUMN_RENAME = {
+    "monthly_total_95th_mbps": "30 Days 95th",
+    "monthly_tx_95th_mbps": "30 Days Tx 95th",
+    "monthly_rx_95th_mbps": "30 Days Rx 95th",
+}
+
+
 def write_month_csvs(
     merged_df: pd.DataFrame,
     metrics_results: list[dict],
     target_months: list[dict],
     vco_name: str,
     output_dir: str,
+    *,
+    all_metrics: bool = False,
 ) -> list[str]:
     """Write one CSV file per target month enriched with 95th percentile metrics.
 
     For each month in ``target_months``, creates a copy of ``merged_df`` with
     a ``Month-Year`` column and left-merged p95 metrics columns.  Edges that
-    have no metrics entry for a given month will have ``NaN`` in the three p95
+    have no metrics entry for a given month will have ``NaN`` in the p95
     columns.
+
+    By default only the total 95th percentile column (``30 Days 95th``) is
+    included.  When ``all_metrics`` is ``True``, the tx and rx columns are
+    also included.
 
     CSV files are written with UTF-8 BOM encoding (``utf-8-sig``) and named
     using the pattern ``{vco_name}.{MM-YYYY}.csv``.
@@ -66,22 +85,24 @@ def write_month_csvs(
             (format ``"MM-YYYY"``).
         vco_name: VCO hostname string used as the CSV filename prefix.
         output_dir: Directory path where the CSV files will be written.
+        all_metrics: When ``True``, include tx and rx columns alongside
+            total.  Defaults to ``False`` (total only).
 
     Returns:
         List of absolute file paths (as strings) for every CSV written, in
         the same order as ``target_months``.
     """
+    metric_cols = _ALL_METRIC_COLS if all_metrics else ["monthly_total_95th_mbps"]
+
     csv_paths: list[str] = []
 
     for month in target_months:
         month_label: str = month["label"]
 
-        # Filter metrics to this month only
         month_metrics = [
             r for r in metrics_results if r.get("month_label") == month_label
         ]
 
-        # Copy merged_df and tag every row with the month label
         month_df = merged_df.copy()
         month_df["Month-Year"] = month_label
 
@@ -91,25 +112,16 @@ def write_month_csvs(
                     "enterprise_name": "Customer Name",
                     "edge_name": "Edge Name",
                 }
-            )[
-                [
-                    "Customer Name",
-                    "Edge Name",
-                    "monthly_tx_95th_mbps",
-                    "monthly_rx_95th_mbps",
-                    "monthly_total_95th_mbps",
-                ]
-            ]
+            )[["Customer Name", "Edge Name"] + metric_cols]
             month_df = month_df.merge(
                 metrics_df, on=["Customer Name", "Edge Name"], how="left"
             )
         else:
-            for col in (
-                "monthly_tx_95th_mbps",
-                "monthly_rx_95th_mbps",
-                "monthly_total_95th_mbps",
-            ):
+            for col in metric_cols:
                 month_df[col] = float("nan")
+
+        rename_map = {k: v for k, v in _COLUMN_RENAME.items() if k in month_df.columns}
+        month_df.rename(columns=rename_map, inplace=True)
 
         filename = f"{vco_name}.{month_label}.csv"
         full_path = str(Path(output_dir) / filename)

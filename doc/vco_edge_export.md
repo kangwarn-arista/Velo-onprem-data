@@ -133,6 +133,7 @@ uv run python vco_edge_export.py --strict_validation
 | `--vco-token` | string | `.env` | VCO API token. Overrides `VCO_TOKEN` in `.env` |
 | `--months N` | int | `3` | Number of complete calendar months to collect (1–12). Mutually exclusive with `--last_30_days` |
 | `--last_30_days` | boolean | `False` | Collect metrics for the trailing 30 days instead of complete calendar months. Mutually exclusive with `--months` |
+| `--all_metrics` | boolean | `False` | Include tx and rx columns in addition to total in the output CSVs. By default only the `30 Days 95th` (total) column is included |
 | `--strict_validation` | boolean | `False` | Abort on sample count mismatch instead of logging a warning |
 | `--diagnose EDGE_NAME` | string | `None` | Troubleshoot metrics for a specific edge by name. Prints diagnostic output and exits |
 
@@ -151,7 +152,7 @@ uv run python vco_edge_export.py --strict_validation
 | 95th enabled (default) | `<vco-host>_metrics_<timestamp>.zip` | Zip archive of the above directory |
 | `--diagnose` | *(stdout only)* | Diagnostic report printed to the terminal; no files written |
 
-The per-month CSV files include columns for P95 bandwidth in Mbps for tx, rx, and total directions.
+The per-month CSV files include a `30 Days 95th` column (total P95 bandwidth in Mbps) by default. Use `--all_metrics` to also include the tx and rx columns (`30 Days Tx 95th`, `30 Days Rx 95th`).
 
 ### Error Handling
 

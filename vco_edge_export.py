@@ -249,6 +249,13 @@ def build_parser() -> argparse.ArgumentParser:
         help="Collect metrics for the trailing 30 days (including today) instead of complete calendar months.",
     )
     parser.add_argument(
+        "--all_metrics",
+        action="store_true",
+        default=False,
+        help="Include tx and rx columns in addition to total in the output CSVs. "
+             "By default only the total 95th percentile column is included.",
+    )
+    parser.add_argument(
         "--strict_validation",
         action="store_true",
         default=False,
@@ -599,12 +606,18 @@ if __name__ == "__main__":
                             **metrics,
                         }
                     )
-                    print(
-                        f"    {month['label']}: "
-                        f"p95 tx={metrics['monthly_tx_95th_mbps']:.4f} "
-                        f"rx={metrics['monthly_rx_95th_mbps']:.4f} "
-                        f"total={metrics['monthly_total_95th_mbps']:.4f} Mbps"
-                    )
+                    if args.all_metrics:
+                        print(
+                            f"    {month['label']}: "
+                            f"p95 tx={metrics['monthly_tx_95th_mbps']:.4f} "
+                            f"rx={metrics['monthly_rx_95th_mbps']:.4f} "
+                            f"total={metrics['monthly_total_95th_mbps']:.4f} Mbps"
+                        )
+                    else:
+                        print(
+                            f"    {month['label']}: "
+                            f"p95 total={metrics['monthly_total_95th_mbps']:.4f} Mbps"
+                        )
                 except VCOAuthError:
                     raise
                 except Exception as e:
@@ -627,7 +640,8 @@ if __name__ == "__main__":
             output_dir = f"{vco_host}_metrics_{timestamp}"
             os.makedirs(output_dir, exist_ok=True)
             csv_paths = write_month_csvs(
-                merged_df, metrics_results, target_months, vco_host, output_dir
+                merged_df, metrics_results, target_months, vco_host, output_dir,
+                all_metrics=args.all_metrics,
             )
             print(f"  Wrote {len(csv_paths)} CSV file(s) to {output_dir}/")
             zip_filename = f"{output_dir}.zip"

@@ -84,6 +84,7 @@ Options:
   --vco-token TOKEN        VCO API token (overrides VCO_TOKEN in .env)
   --months N               Months to collect, 1–12 (default: 3)
   --last_30_days           Use trailing 30 days instead of calendar months
+  --all_metrics            Include tx and rx columns alongside total in CSVs
   --strict_validation      Abort on sample count mismatch
   --diagnose EDGE_NAME     Print diagnostics for a specific edge and exit
 ```
@@ -101,5 +102,5 @@ Options:
 | File | When | Description |
 |------|------|-------------|
 | `vco_edge_export.csv` | Always | License + edge status merge |
-| `<host>_metrics_<ts>/` | 95th enabled | Per-month P95 bandwidth CSVs (tx, rx, total in Mbps) |
+| `<host>_metrics_<ts>/` | 95th enabled | Per-month P95 bandwidth CSVs (`30 Days 95th` by default; add `--all_metrics` for tx/rx) |
 | `<host>_metrics_<ts>.zip` | 95th enabled | Zip archive of the metrics directory |
