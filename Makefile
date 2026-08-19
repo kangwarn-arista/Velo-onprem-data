@@ -51,7 +51,7 @@ print(' '.join(parts))
 endef
 export DETECT_IMPORTS
 
-.PHONY: pyinstaller nuitka clean stamp-version package
+.PHONY: pyinstaller nuitka clean stamp-version bundle package
 
 stamp-version:
 	@TAG=$$(git describe --tags --abbrev=0 2>/dev/null) && \
@@ -88,7 +88,9 @@ nuitka: stamp-version
 		$$FLAGS \
 		$(MAIN_SCRIPT)
 
-package: clean nuitka
+bundle:
+	@test -f $(BINARY_NAME) || \
+		{ echo "ERROR: $(BINARY_NAME) not found. Run 'make nuitka' or 'make pyinstaller' first."; exit 1; }
 	@command -v pdflatex >/dev/null 2>&1 || \
 		{ echo "ERROR: pdflatex not found. Install basictex (macOS) or texlive-latex-base (Linux)."; exit 1; } && \
 	TAG=$$(git describe --tags --abbrev=0 2>/dev/null) && \
@@ -104,6 +106,8 @@ package: clean nuitka
 	echo "  Created $${DIR}/vco_edge_export_binary.pdf" && \
 	zip -r "$${DIR}.zip" "$${DIR}" && \
 	echo "Package ready: $${DIR}.zip"
+
+package: clean nuitka bundle
 
 clean:
 	rm -rf build/ dist/ *.spec
