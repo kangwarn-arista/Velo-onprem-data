@@ -693,18 +693,18 @@ class TestGetLast30Days:
         duration_ms = entry["end_ms"] - entry["start_ms"]
         assert duration_ms == 30 * 24 * 60 * 60 * 1000
 
-    def test_end_is_midnight_after_reference(self):
+    def test_end_is_midnight_of_reference(self):
         ref = date(2026, 8, 8)
         result = get_last_30_days(reference_date=ref)
         entry = result[0]
-        expected_end = datetime(2026, 8, 9, tzinfo=timezone.utc)
+        expected_end = datetime(2026, 8, 8, tzinfo=timezone.utc)
         assert entry["end_ms"] == int(expected_end.timestamp() * 1000)
 
     def test_start_is_30_days_before_end(self):
         ref = date(2026, 8, 8)
         result = get_last_30_days(reference_date=ref)
         entry = result[0]
-        expected_start = datetime(2026, 7, 10, tzinfo=timezone.utc)
+        expected_start = datetime(2026, 7, 9, tzinfo=timezone.utc)
         assert entry["start_ms"] == int(expected_start.timestamp() * 1000)
 
     def test_year_and_month_match_reference(self):

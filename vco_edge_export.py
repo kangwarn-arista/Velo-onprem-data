@@ -1,4 +1,4 @@
-__version__ = "dev"
+__version__ = "1.3"
 
 import argparse
 import io
@@ -558,6 +558,7 @@ if __name__ == "__main__":
                 print("  >> No traffic data — metrics will be 0.0")
             else:
                 daily_detail = compute_daily_p95s(link_series, month["start_ms"])
+                daily_detail.sort(key=lambda d: d["total_p95"], reverse=True)
 
                 print(f"\n  Daily P95 values ({len(daily_detail)} days):")
                 print(f"  {'Date':<12} {'Samples':>7}  "
@@ -566,14 +567,14 @@ if __name__ == "__main__":
                       f"{'─' * 10}  {'─' * 10}  {'─' * 12}")
                 for day in daily_detail:
                     print(f"  {day['date']!s:<12} {day['sample_count']:>7}  "
-                          f"{day['tx_p95']:>10.4f}  {day['rx_p95']:>10.4f}  "
-                          f"{day['total_p95']:>12.4f}")
+                          f"{day['tx_p95']:>10.0f}  {day['rx_p95']:>10.0f}  "
+                          f"{day['total_p95']:>12.0f}")
 
                 metrics = compute_edge_month_metrics(link_series, month["start_ms"])
                 print(f"\n  Monthly P95 (from {len(daily_detail)} daily P95 values):")
-                print(f"    tx={metrics['monthly_tx_95th_mbps']:.4f}  "
-                      f"rx={metrics['monthly_rx_95th_mbps']:.4f}  "
-                      f"total={metrics['monthly_total_95th_mbps']:.4f} Mbps")
+                print(f"    tx={metrics['monthly_tx_95th_mbps']:.0f}  "
+                      f"rx={metrics['monthly_rx_95th_mbps']:.0f}  "
+                      f"total={metrics['monthly_total_95th_mbps']:.0f} Mbps")
 
         print(f"\n{'=' * 60}")
         print("Diagnostic complete.")
@@ -643,14 +644,14 @@ if __name__ == "__main__":
                     if args.all_metrics:
                         print(
                             f"    {month['label']}: "
-                            f"p95 tx={metrics['monthly_tx_95th_mbps']:.4f} "
-                            f"rx={metrics['monthly_rx_95th_mbps']:.4f} "
-                            f"total={metrics['monthly_total_95th_mbps']:.4f} Mbps"
+                            f"p95 tx={metrics['monthly_tx_95th_mbps']:.0f} "
+                            f"rx={metrics['monthly_rx_95th_mbps']:.0f} "
+                            f"total={metrics['monthly_total_95th_mbps']:.0f} Mbps"
                         )
                     else:
                         print(
                             f"    {month['label']}: "
-                            f"p95 total={metrics['monthly_total_95th_mbps']:.4f} Mbps"
+                            f"p95 total={metrics['monthly_total_95th_mbps']:.0f} Mbps"
                         )
                 except VCOAuthError:
                     raise

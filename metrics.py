@@ -95,10 +95,10 @@ def max_samples_for_month(year: int, month: int) -> int:
 def get_last_30_days(
     reference_date: date | None = None,
 ) -> list[dict]:
-    """Return a single-element list covering the trailing 30 days ending today.
+    """Return a single-element list covering 30 days up to (but excluding) today.
 
-    The window runs from ``(reference_date - 29 days) 00:00 UTC`` to
-    ``(reference_date + 1 day) 00:00 UTC``, inclusive of the reference date.
+    The window runs from ``(today - 30 days) 00:00 UTC`` to
+    ``today 00:00 UTC``, excluding the current (incomplete) day.
 
     Args:
         reference_date: The "today" anchor.  Defaults to ``date.today()``.
@@ -111,11 +111,9 @@ def get_last_30_days(
     if reference_date is None:
         reference_date = date.today()
 
-    end_date = reference_date + timedelta(days=1)
-    start_date = end_date - timedelta(days=30)
-
+    end_dt = datetime(reference_date.year, reference_date.month, reference_date.day, tzinfo=timezone.utc)
+    start_date = reference_date - timedelta(days=30)
     start_dt = datetime(start_date.year, start_date.month, start_date.day, tzinfo=timezone.utc)
-    end_dt = datetime(end_date.year, end_date.month, end_date.day, tzinfo=timezone.utc)
 
     return [
         {
@@ -139,7 +137,11 @@ def bytes_to_mbps(byte_count: int | float) -> float:
     Returns:
         Throughput in megabits per second (Mbps).
     """
-    return byte_count * 8 / 1_048_576 / 300
+    # Do this so we follow the same logic as in PowerBI
+    bits = round(byte_count * 8)
+    mbits = round(bits / 1_048_576)
+    mbps = round(mbits / 300)
+    return mbps
 
 
 def percentile_95(values: list[float | int]) -> float | int:
@@ -376,12 +378,12 @@ def compute_edge_month_metrics(
 
     Returns:
         Dict with 3 keys: ``monthly_{tx,rx,total}_95th_mbps``.
-        All values are 0.0 when no sample data is available.
+        All values are 0 when no sample data is available.
     """
     zero_result = {
-        "monthly_tx_95th_mbps": 0.0,
-        "monthly_rx_95th_mbps": 0.0,
-        "monthly_total_95th_mbps": 0.0,
+        "monthly_tx_95th_mbps": 0,
+        "monthly_rx_95th_mbps": 0,
+        "monthly_total_95th_mbps": 0,
     }
 
     daily_p95s = compute_daily_p95s(link_series_result, start_ms)
@@ -393,9 +395,9 @@ def compute_edge_month_metrics(
     all_daily_total = [d["total_p95"] for d in daily_p95s]
 
     return {
-        "monthly_tx_95th_mbps": math.ceil(percentile_95(all_daily_tx)),
-        "monthly_rx_95th_mbps": math.ceil(percentile_95(all_daily_rx)),
-        "monthly_total_95th_mbps": math.ceil(percentile_95(all_daily_total)),
+        "monthly_tx_95th_mbps": percentile_95(all_daily_tx),
+        "monthly_rx_95th_mbps": percentile_95(all_daily_rx),
+        "monthly_total_95th_mbps": percentile_95(all_daily_total),
     }
 
 

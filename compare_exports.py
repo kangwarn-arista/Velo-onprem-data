@@ -113,7 +113,7 @@ def compare(maestro: pd.DataFrame, vco: pd.DataFrame) -> dict:
 
     # Bandwidth: show all rows, flag those exceeding tolerance
     m_bw_col = _resolve_col(matched, "30 Days 95th", "_maestro")
-    v_bw_col = _resolve_col(matched, "monthly_total_95th_mbps", "_vco")
+    v_bw_col = _resolve_col(matched, "30 Days 95th", "_vco")
     if m_bw_col and v_bw_col:
         m_bw = pd.to_numeric(matched[m_bw_col], errors="coerce")
         v_bw = pd.to_numeric(matched[v_bw_col], errors="coerce")
@@ -121,9 +121,9 @@ def compare(maestro: pd.DataFrame, vco: pd.DataFrame) -> dict:
         if both_valid.any():
             name_col = _resolve_col(matched, "Name", "_maestro") or "Edge Logical ID"
             bw_all = matched[both_valid][["Edge Logical ID", name_col]].copy()
-            bw_all["Maestro 95th"] = m_bw[both_valid].values
-            bw_all["VCO 95th"] = v_bw[both_valid].round(1).values
-            delta = (m_bw[both_valid] - v_bw[both_valid]).round(1).values
+            bw_all["Maestro 95th"] = m_bw[both_valid].round(0).astype(int).values
+            bw_all["VCO 95th"] = v_bw[both_valid].round(0).astype(int).values
+            delta = (m_bw[both_valid] - v_bw[both_valid]).round(0).astype(int).values
             bw_all["Delta (Mbps)"] = delta
             bw_all["Flag"] = [">>>" if abs(d) >= BW_TOLERANCE_MBPS else "" for d in delta]
             bw_all.columns = ["Edge UUID", "Edge Name", "Maestro 95th", "VCO 95th", "Delta (Mbps)", "Flag"]
