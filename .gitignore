@@ -25,3 +25,6 @@ dist/**
 
 # Mac Meta-data File
 .DS_Store
+
+# VS-Code
+.vscode

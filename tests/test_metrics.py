@@ -15,9 +15,12 @@ BYTES_PER_SAMPLE_1MBPS = 39_321_600
 
 from metrics import (
     aggregate_link_samples,
+    aggregate_peak_samples,
+    bps_to_mbps,
     bytes_to_mbps,
     compute_daily_p95s,
     compute_edge_month_metrics,
+    compute_peak_p95,
     diagnose_edge_metrics,
     get_last_30_days,
     get_target_months,
@@ -144,8 +147,8 @@ class TestBytesToMbps:
         assert bytes_to_mbps(0) == 0.0
 
     def test_one_megabyte_in_bytes(self):
-        """bytes_to_mbps(1_048_576) returns exactly 8/300."""
-        assert bytes_to_mbps(1_048_576) == pytest.approx(8 / 300)
+        """bytes_to_mbps(1_048_576) returns 0 (PowerBI rounding truncates small values)."""
+        assert bytes_to_mbps(1_048_576) == 0
 
     def test_exact_one_mbps(self):
         """bytes_to_mbps(BYTES_PER_SAMPLE_1MBPS) returns exactly 1.0."""
@@ -388,16 +391,16 @@ class TestComputeDailyP95s:
     def test_single_day_288_samples(self):
         """288 identical samples (1 full day) produce one daily entry."""
         links = [{"series": [
-            {"metric": "bytesTx", "data": [1_048_576] * 288},
-            {"metric": "bytesRx", "data": [2_097_152] * 288},
+            {"metric": "bytesTx", "data": [10 * BYTES_PER_SAMPLE_1MBPS] * 288},
+            {"metric": "bytesRx", "data": [20 * BYTES_PER_SAMPLE_1MBPS] * 288},
         ]}]
         result = compute_daily_p95s(links, self.JULY_START_MS)
         assert len(result) == 1
         assert result[0]["date"] == date(2026, 7, 1)
         assert result[0]["sample_count"] == 288
-        assert result[0]["tx_p95"] == pytest.approx(8 / 300)
-        assert result[0]["rx_p95"] == pytest.approx(16 / 300)
-        assert result[0]["total_p95"] == pytest.approx(24 / 300)
+        assert result[0]["tx_p95"] == 10
+        assert result[0]["rx_p95"] == 20
+        assert result[0]["total_p95"] == 30
 
     def test_daily_p95_picks_correct_rank(self):
         """288 ramping samples select the 274th-largest value (ceil(288 * 0.95))."""
@@ -419,15 +422,15 @@ class TestComputeDailyP95s:
     def test_two_days_sorted_by_date(self):
         """576 samples spanning 2 days produce two entries in date order."""
         links = [{"series": [
-            {"metric": "bytesTx", "data": [1_048_576] * 288 + [2_097_152] * 288},
+            {"metric": "bytesTx", "data": [10 * BYTES_PER_SAMPLE_1MBPS] * 288 + [20 * BYTES_PER_SAMPLE_1MBPS] * 288},
             {"metric": "bytesRx", "data": [0] * 576},
         ]}]
         result = compute_daily_p95s(links, self.JULY_START_MS)
         assert len(result) == 2
         assert result[0]["date"] == date(2026, 7, 1)
         assert result[1]["date"] == date(2026, 7, 2)
-        assert result[0]["tx_p95"] == pytest.approx(8 / 300)
-        assert result[1]["tx_p95"] == pytest.approx(16 / 300)
+        assert result[0]["tx_p95"] == 10
+        assert result[1]["tx_p95"] == 20
 
     def test_result_keys(self):
         """Each daily entry has the expected keys."""
@@ -720,3 +723,154 @@ class TestGetLast30Days:
         today = date.today()
         assert entry["year"] == today.year
         assert entry["month"] == today.month
+
+
+# ── bps_to_mbps ──────────────────────────────────────────────────────────
+
+
+class TestBpsToMbps:
+    """Tests for bits-per-second to megabits-per-second conversion."""
+
+    def test_zero(self):
+        assert bps_to_mbps(0) == 0
+
+    def test_one_megabit(self):
+        """1,048,576 bps = 1 Mbps."""
+        assert bps_to_mbps(1_048_576) == 1
+
+    def test_100_megabits(self):
+        assert bps_to_mbps(100 * 1_048_576) == 100
+
+    def test_sub_megabit_rounds_to_zero(self):
+        assert bps_to_mbps(500_000) == 0
+
+
+# ── aggregate_peak_samples ───────────────────────────────────────────────
+
+
+class TestAggregatePeakSamples:
+    """Tests for cross-link peak BPS sample aggregation."""
+
+    def test_single_link_single_sample(self):
+        links = [{"series": [
+            {"metric": "maxIntervalBpsTx", "data": [1_000_000]},
+            {"metric": "maxIntervalBpsRx", "data": [2_000_000]},
+        ]}]
+        result = aggregate_peak_samples(links)
+        assert result == [{"max_tx_bps": 1_000_000, "max_rx_bps": 2_000_000}]
+
+    def test_two_links_sums_at_each_index(self):
+        links = [
+            {"series": [
+                {"metric": "maxIntervalBpsTx", "data": [1_000_000]},
+                {"metric": "maxIntervalBpsRx", "data": [2_000_000]},
+            ]},
+            {"series": [
+                {"metric": "maxIntervalBpsTx", "data": [500_000]},
+                {"metric": "maxIntervalBpsRx", "data": [600_000]},
+            ]},
+        ]
+        result = aggregate_peak_samples(links)
+        assert result == [{"max_tx_bps": 1_500_000, "max_rx_bps": 2_600_000}]
+
+    def test_empty_list(self):
+        assert aggregate_peak_samples([]) == []
+
+    def test_none_values_treated_as_zero(self):
+        links = [{"series": [
+            {"metric": "maxIntervalBpsTx", "data": [1_000_000, None]},
+            {"metric": "maxIntervalBpsRx", "data": [None, 2_000_000]},
+        ]}]
+        result = aggregate_peak_samples(links)
+        assert result == [
+            {"max_tx_bps": 1_000_000, "max_rx_bps": 0},
+            {"max_tx_bps": 0, "max_rx_bps": 2_000_000},
+        ]
+
+    def test_missing_peak_metrics_returns_empty(self):
+        """Link with only bytesTx/Rx (no peak metrics) returns empty."""
+        links = [{"series": [
+            {"metric": "bytesTx", "data": [100]},
+            {"metric": "bytesRx", "data": [200]},
+        ]}]
+        assert aggregate_peak_samples(links) == []
+
+
+# ── compute_peak_p95 ─────────────────────────────────────────────────────
+
+
+class TestComputePeakP95:
+    """Tests for monthly P95 of peak BPS total."""
+
+    JULY_START_MS = int(datetime(2026, 7, 1, tzinfo=timezone.utc).timestamp() * 1000)
+
+    def test_empty_returns_zero(self):
+        assert compute_peak_p95([], 0) == 0.0
+
+    def test_no_peak_metrics_returns_zero(self):
+        """Link series with only bytesTx/Rx returns 0.0."""
+        links = [{"series": [
+            {"metric": "bytesTx", "data": [100] * 288},
+            {"metric": "bytesRx", "data": [200] * 288},
+        ]}]
+        assert compute_peak_p95(links, self.JULY_START_MS) == 0.0
+
+    def test_uniform_peak_data(self):
+        """288 identical peak samples (1 day) produce expected P95."""
+        bps = 10 * 1_048_576  # 10 Mbps in bps
+        links = [{"series": [
+            {"metric": "maxIntervalBpsTx", "data": [bps] * 288},
+            {"metric": "maxIntervalBpsRx", "data": [bps] * 288},
+        ]}]
+        result = compute_peak_p95(links, self.JULY_START_MS)
+        # total = 20 Mbps for every sample; P95 = 20
+        assert result == 20
+
+    def test_two_day_peak_data(self):
+        """Two days of differing peak data produce correct monthly P95."""
+        bps_day1 = 10 * 1_048_576
+        bps_day2 = 20 * 1_048_576
+        links = [{"series": [
+            {"metric": "maxIntervalBpsTx", "data": [bps_day1] * 288 + [bps_day2] * 288},
+            {"metric": "maxIntervalBpsRx", "data": [0] * 576},
+        ]}]
+        result = compute_peak_p95(links, self.JULY_START_MS)
+        # Day 1 P95 = 10, Day 2 P95 = 20, Monthly P95 of [10, 20] = 20
+        assert result == 20
+
+
+# ── compute_edge_month_metrics with include_peak ─────────────────────────
+
+
+class TestComputeEdgeMonthMetricsWithPeak:
+    """Tests for the include_peak parameter on compute_edge_month_metrics."""
+
+    JULY_START_MS = int(datetime(2026, 7, 1, tzinfo=timezone.utc).timestamp() * 1000)
+
+    def test_include_peak_false_no_peak_key(self):
+        """Without include_peak, result has no monthly_peak_95th_mbps key."""
+        result = compute_edge_month_metrics([], 0, include_peak=False)
+        assert "monthly_peak_95th_mbps" not in result
+
+    def test_include_peak_true_has_peak_key(self):
+        """With include_peak=True, result includes monthly_peak_95th_mbps."""
+        result = compute_edge_month_metrics([], 0, include_peak=True)
+        assert "monthly_peak_95th_mbps" in result
+        assert result["monthly_peak_95th_mbps"] == 0
+
+    def test_include_peak_with_data(self):
+        """Peak P95 is computed from maxIntervalBps data when include_peak=True."""
+        bps = 50 * 1_048_576  # 50 Mbps
+        links = [{"series": [
+            {"metric": "bytesTx", "data": [BYTES_PER_SAMPLE_1MBPS] * 288},
+            {"metric": "bytesRx", "data": [BYTES_PER_SAMPLE_1MBPS] * 288},
+            {"metric": "maxIntervalBpsTx", "data": [bps] * 288},
+            {"metric": "maxIntervalBpsRx", "data": [bps] * 288},
+        ]}]
+        result = compute_edge_month_metrics(
+            links, self.JULY_START_MS, include_peak=True,
+        )
+        assert result["monthly_tx_95th_mbps"] == 1
+        assert result["monthly_rx_95th_mbps"] == 1
+        assert result["monthly_total_95th_mbps"] == 2
+        assert result["monthly_peak_95th_mbps"] == 100  # 50+50 Mbps

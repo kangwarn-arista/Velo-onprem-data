@@ -6,12 +6,53 @@ metrics columns, and packaging a directory of CSVs into a zip archive.
 No VCO API credentials are required -- all functions operate on local
 data structures and the filesystem.
 """
+import io
 import json
 import zipfile
 from pathlib import Path
 from urllib.parse import urlparse
 
+
 import pandas as pd
+
+
+def build_output_metadata(
+    version: str,
+    vco_host: str,
+    generated_at: str,
+    *,
+    vco_version: str | None = None,
+    vco_build: str | None = None,
+) -> dict:
+    """Build a sanitized metadata dict for the output archive.
+
+    Returns only non-sensitive identification fields. Intentionally excludes
+    collection parameters (months, edge count, record count, collection mode,
+    all_metrics flag, enterprise count) to prevent information disclosure in
+    the ``_metadata.json`` file embedded in output archives.
+
+    Args:
+        version: Application version string.
+        vco_host: VCO hostname used for the export.
+        generated_at: Timestamp string for when the export was generated.
+        vco_version: Optional VCO software version (e.g. ``"6.4.2.5"``).
+        vco_build: Optional VCO build identifier
+            (e.g. ``"R6135-20260803-0930-GA-9af6dfb8fe"``).
+
+    Returns:
+        Dict with identification keys: ``version``, ``vco_host``,
+        ``generated_at``, and optionally ``vco_version`` / ``vco_build``.
+    """
+    result = {
+        "version": version,
+        "vco_host": vco_host,
+        "generated_at": generated_at,
+    }
+    if vco_version is not None:
+        result["vco_version"] = vco_version
+    if vco_build is not None:
+        result["vco_build"] = vco_build
+    return result
 
 
 def extract_vco_name(vco_url: str) -> str:
@@ -44,10 +85,13 @@ _ALL_METRIC_COLS = [
     "monthly_total_95th_mbps",
 ]
 
+_PEAK_METRIC_COL = "monthly_peak_95th_mbps"
+
 _COLUMN_RENAME = {
     "monthly_total_95th_mbps": "30 Days 95th",
     "monthly_tx_95th_mbps": "30 Days Tx 95th",
     "monthly_rx_95th_mbps": "30 Days Rx 95th",
+    _PEAK_METRIC_COL: "30 Days P95 Peak",
 }
 
 
@@ -59,6 +103,7 @@ def write_month_csvs(
     output_dir: str,
     *,
     all_metrics: bool = False,
+    include_peak: bool = False,
 ) -> list[str]:
     """Write one CSV file per target month enriched with 95th percentile metrics.
 
@@ -70,6 +115,11 @@ def write_month_csvs(
     By default only the total 95th percentile column (``30 Days 95th``) is
     included.  When ``all_metrics`` is ``True``, the tx and rx columns are
     also included.
+
+    The ``30 Days P95 Peak`` column is always present in the output.  When
+    ``include_peak`` is ``True`` the column contains computed peak P95
+    values from the metrics data.  When ``False`` (VCO < 6.4) the column
+    is empty.
 
     CSV files are written with UTF-8 BOM encoding (``utf-8-sig``) and named
     using the pattern ``{vco_name}.{MM-YYYY}.csv``.
@@ -88,12 +138,16 @@ def write_month_csvs(
         output_dir: Directory path where the CSV files will be written.
         all_metrics: When ``True``, include tx and rx columns alongside
             total.  Defaults to ``False`` (total only).
+        include_peak: When ``True``, include peak P95 data from metrics
+            results.  When ``False``, the column appears but is empty.
 
     Returns:
         List of absolute file paths (as strings) for every CSV written, in
         the same order as ``target_months``.
     """
     metric_cols = _ALL_METRIC_COLS if all_metrics else ["monthly_total_95th_mbps"]
+    if include_peak:
+        metric_cols = metric_cols + [_PEAK_METRIC_COL]
 
     csv_paths: list[str] = []
 
@@ -120,6 +174,9 @@ def write_month_csvs(
         else:
             for col in metric_cols:
                 month_df[col] = float("nan")
+
+        if _PEAK_METRIC_COL not in month_df.columns:
+            month_df[_PEAK_METRIC_COL] = float("nan")
 
         rename_map = {k: v for k, v in _COLUMN_RENAME.items() if k in month_df.columns}
         month_df.rename(columns=rename_map, inplace=True)
@@ -163,5 +220,44 @@ def create_zip_archive(
                 "_metadata.json",
                 json.dumps(metadata, indent=2),
             )
+
+    return zip_path
+
+
+def create_encrypted_archive(
+    source_dir: str,
+    zip_path: str,
+    *,
+    metadata: dict | None = None,
+) -> str:
+    """Compress-then-encrypt CSV files into a two-file archive.
+
+    Collects all files in ``source_dir`` into an in-memory zip, encrypts the
+    resulting bytes with Fernet, then writes a final zip containing
+    ``data.enc`` (the encrypted blob) and ``_metadata.json`` (if provided).
+
+    Args:
+        source_dir: Path to the directory containing files to archive.
+        zip_path: Destination path for the output zip file.
+        metadata: Optional dict written as ``_metadata.json`` inside the
+            archive.
+
+    Returns:
+        The ``zip_path`` string that was passed in.
+    """
+    from crypto import encrypt_blob
+
+    buffer = io.BytesIO()
+    with zipfile.ZipFile(buffer, "w", zipfile.ZIP_DEFLATED) as inner_zf:
+        for file in Path(source_dir).iterdir():
+            if file.is_file():
+                inner_zf.write(file, arcname=file.name)
+
+    encrypted_blob = encrypt_blob(buffer.getvalue())
+
+    with zipfile.ZipFile(zip_path, "w", zipfile.ZIP_DEFLATED) as zf:
+        zf.writestr("data.enc", encrypted_blob)
+        if metadata is not None:
+            zf.writestr("_metadata.json", json.dumps(metadata, indent=2))
 
     return zip_path

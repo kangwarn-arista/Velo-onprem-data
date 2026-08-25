@@ -111,7 +111,7 @@ class TestWriteMonthCsvs:
         assert (tmp_path / "vco.test.com.07-2026.csv").exists()
 
     def test_csv_has_additional_columns(self, tmp_path):
-        """The written CSV contains all merged_df columns plus the p95 columns."""
+        """The written CSV contains all merged_df columns plus the renamed p95 columns."""
         merged_df = self._make_merged_df()
         metrics_results = self._make_metrics_results_one()
         target_months = self._make_target_months_one()
@@ -122,9 +122,8 @@ class TestWriteMonthCsvs:
 
         df = pd.read_csv(tmp_path / "vco.test.com.07-2026.csv")
         assert "Month-Year" in df.columns
-        assert "monthly_tx_95th_mbps" in df.columns
-        assert "monthly_rx_95th_mbps" in df.columns
-        assert "monthly_total_95th_mbps" in df.columns
+        assert "30 Days 95th" in df.columns
+        assert "30 Days P95 Peak" in df.columns
         for col in merged_df.columns:
             assert col in df.columns
 
@@ -142,7 +141,7 @@ class TestWriteMonthCsvs:
         assert (df["Month-Year"] == "07-2026").all()
 
     def test_unmatched_edge_has_nan_metrics(self, tmp_path):
-        """An edge with no metrics entry has NaN in all 3 p95 columns."""
+        """An edge with no metrics entry has NaN in the p95 columns."""
         merged_df = self._make_merged_df()
         metrics_results = self._make_metrics_results_one()
         target_months = self._make_target_months_one()
@@ -154,9 +153,8 @@ class TestWriteMonthCsvs:
         df = pd.read_csv(tmp_path / "vco.test.com.07-2026.csv")
         unmatched = df[df["Edge Name"] == "edge-02"]
         assert len(unmatched) == 1
-        assert pd.isna(unmatched["monthly_tx_95th_mbps"].iloc[0])
-        assert pd.isna(unmatched["monthly_rx_95th_mbps"].iloc[0])
-        assert pd.isna(unmatched["monthly_total_95th_mbps"].iloc[0])
+        assert pd.isna(unmatched["30 Days 95th"].iloc[0])
+        assert pd.isna(unmatched["30 Days P95 Peak"].iloc[0])
 
     def test_two_months_creates_two_csvs(self, tmp_path):
         """write_month_csvs with 2 months returns a list of 2 paths and creates both files."""
@@ -203,6 +201,89 @@ class TestWriteMonthCsvs:
         assert len(result) == 2
         assert (tmp_path / "vco.test.com.06-2026.csv").exists()
         assert (tmp_path / "vco.test.com.07-2026.csv").exists()
+
+
+class TestWriteMonthCsvsWithPeak:
+    """Tests for peak P95 column in CSV output."""
+
+    def _make_merged_df(self):
+        return pd.DataFrame(
+            {
+                "Customer Name": ["Acme Corp", "Beta Inc"],
+                "Edge Name": ["edge-01", "edge-02"],
+                "Edge UUID": ["uuid-aaa", "uuid-bbb"],
+                "Edge Status": ["CONNECTED", "OFFLINE"],
+            }
+        )
+
+    def _make_target_months_one(self):
+        return [{"label": "07-2026", "year": 2026, "month": 7, "start_ms": 0, "end_ms": 0}]
+
+    def test_peak_column_present_when_include_peak_false(self, tmp_path):
+        """30 Days P95 Peak column appears even when include_peak=False (VCO < 6.4)."""
+        merged_df = self._make_merged_df()
+        metrics_results = [
+            {
+                "enterprise_name": "Acme Corp",
+                "edge_name": "edge-01",
+                "month_label": "07-2026",
+                "monthly_tx_95th_mbps": 1.5,
+                "monthly_rx_95th_mbps": 2.5,
+                "monthly_total_95th_mbps": 4.0,
+            }
+        ]
+        write_month_csvs(
+            merged_df, metrics_results, self._make_target_months_one(),
+            "vco.test.com", str(tmp_path), include_peak=False,
+        )
+        df = pd.read_csv(tmp_path / "vco.test.com.07-2026.csv")
+        assert "30 Days P95 Peak" in df.columns
+        assert pd.isna(df["30 Days P95 Peak"].iloc[0])
+
+    def test_peak_column_has_data_when_include_peak_true(self, tmp_path):
+        """30 Days P95 Peak column has values when include_peak=True (VCO >= 6.4)."""
+        merged_df = self._make_merged_df()
+        metrics_results = [
+            {
+                "enterprise_name": "Acme Corp",
+                "edge_name": "edge-01",
+                "month_label": "07-2026",
+                "monthly_tx_95th_mbps": 1.5,
+                "monthly_rx_95th_mbps": 2.5,
+                "monthly_total_95th_mbps": 4.0,
+                "monthly_peak_95th_mbps": 25.0,
+            }
+        ]
+        write_month_csvs(
+            merged_df, metrics_results, self._make_target_months_one(),
+            "vco.test.com", str(tmp_path), include_peak=True,
+        )
+        df = pd.read_csv(tmp_path / "vco.test.com.07-2026.csv")
+        assert "30 Days P95 Peak" in df.columns
+        matched = df[df["Edge Name"] == "edge-01"]
+        assert matched["30 Days P95 Peak"].iloc[0] == 25.0
+
+    def test_peak_column_nan_for_unmatched_edge(self, tmp_path):
+        """Unmatched edge has NaN in 30 Days P95 Peak column."""
+        merged_df = self._make_merged_df()
+        metrics_results = [
+            {
+                "enterprise_name": "Acme Corp",
+                "edge_name": "edge-01",
+                "month_label": "07-2026",
+                "monthly_tx_95th_mbps": 1.5,
+                "monthly_rx_95th_mbps": 2.5,
+                "monthly_total_95th_mbps": 4.0,
+                "monthly_peak_95th_mbps": 25.0,
+            }
+        ]
+        write_month_csvs(
+            merged_df, metrics_results, self._make_target_months_one(),
+            "vco.test.com", str(tmp_path), include_peak=True,
+        )
+        df = pd.read_csv(tmp_path / "vco.test.com.07-2026.csv")
+        unmatched = df[df["Edge Name"] == "edge-02"]
+        assert pd.isna(unmatched["30 Days P95 Peak"].iloc[0])
 
 
 # ── create_zip_archive ─────────────────────────────────────────────────────

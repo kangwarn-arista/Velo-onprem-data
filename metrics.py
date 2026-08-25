@@ -187,6 +187,22 @@ def _extract_metric_data(series: list[dict], metric_name: str) -> list[int]:
     return []
 
 
+def bps_to_mbps(bps: int | float) -> float:
+    """Convert bits per second to megabits per second.
+
+    Uses the formula: ``round(bps / 1_048_576)``, consistent with the
+    mebibits-per-second convention used by the existing ``bytes_to_mbps``
+    conversion.
+
+    Args:
+        bps: Throughput in bits per second.
+
+    Returns:
+        Throughput in megabits per second (Mbps).
+    """
+    return round(bps / 1_048_576)
+
+
 def aggregate_link_samples(link_series_result: list[dict]) -> list[dict]:
     """Sum bytesTx and bytesRx across all links at each 5-minute sample index.
 
@@ -230,6 +246,95 @@ def aggregate_link_samples(link_series_result: list[dict]) -> list[dict]:
         aggregated.append({"tx_bytes": tx_total, "rx_bytes": rx_total})
 
     return aggregated
+
+
+def aggregate_peak_samples(link_series_result: list[dict]) -> list[dict]:
+    """Sum maxIntervalBpsTx and maxIntervalBpsRx across all links at each sample index.
+
+    Same aggregation pattern as :func:`aggregate_link_samples` but for the
+    peak BPS metrics available on VCO >= 6.4.
+
+    Args:
+        link_series_result: List of link dicts from the VCO
+            ``metrics/getEdgeLinkSeries`` API response.
+
+    Returns:
+        List of dicts with keys ``max_tx_bps`` and ``max_rx_bps``, one per
+        sample index.  Returns an empty list when no peak series data exists.
+    """
+    max_tx_arrays: list[list[int]] = []
+    max_rx_arrays: list[list[int]] = []
+
+    for link in link_series_result:
+        series = link.get("series") or []
+        max_tx = _extract_metric_data(series, "maxIntervalBpsTx")
+        max_rx = _extract_metric_data(series, "maxIntervalBpsRx")
+        if max_tx:
+            max_tx_arrays.append(max_tx)
+        if max_rx:
+            max_rx_arrays.append(max_rx)
+
+    if not max_tx_arrays and not max_rx_arrays:
+        return []
+
+    max_length = max(
+        (len(a) for a in max_tx_arrays + max_rx_arrays), default=0
+    )
+    if max_length == 0:
+        return []
+
+    aggregated: list[dict] = []
+    for i in range(max_length):
+        tx_total = sum(a[i] for a in max_tx_arrays if i < len(a))
+        rx_total = sum(a[i] for a in max_rx_arrays if i < len(a))
+        aggregated.append({"max_tx_bps": tx_total, "max_rx_bps": rx_total})
+
+    return aggregated
+
+
+def compute_peak_p95(
+    link_series_result: list[dict], start_ms: int
+) -> float:
+    """Compute monthly P95 of daily P95s for peak (maxInterval) BPS total.
+
+    Aggregates ``maxIntervalBpsTx`` and ``maxIntervalBpsRx`` across links,
+    sums them per sample to get peak total, converts to Mbps, groups by
+    UTC day for daily P95, then computes the monthly P95 from daily values.
+
+    Args:
+        link_series_result: List of link dicts from the VCO
+            ``metrics/getEdgeLinkSeries`` API response.
+        start_ms: Start timestamp in UTC milliseconds since epoch.
+
+    Returns:
+        The monthly 95th percentile peak throughput in Mbps.
+        Returns 0.0 when no peak data is available.
+    """
+    samples = aggregate_peak_samples(link_series_result)
+    if not samples:
+        return 0.0
+
+    daily_buckets: dict[date, list[float]] = defaultdict(list)
+
+    for i, sample in enumerate(samples):
+        total_bps = sample["max_tx_bps"] + sample["max_rx_bps"]
+        total_mbps = bps_to_mbps(total_bps)
+
+        sample_ts_ms = start_ms + i * 300_000
+        sample_date = datetime.fromtimestamp(
+            sample_ts_ms / 1000, tz=timezone.utc
+        ).date()
+        daily_buckets[sample_date].append(total_mbps)
+
+    daily_p95s = [
+        percentile_95(values)
+        for values in daily_buckets.values()
+        if values
+    ]
+    if not daily_p95s:
+        return 0.0
+
+    return percentile_95(daily_p95s)
 
 
 def validate_sample_count(
@@ -362,7 +467,10 @@ def compute_daily_p95s(
 
 
 def compute_edge_month_metrics(
-    link_series_result: list[dict], start_ms: int
+    link_series_result: list[dict],
+    start_ms: int,
+    *,
+    include_peak: bool = False,
 ) -> dict:
     """Compute monthly 95th percentile bandwidth metrics for one edge.
 
@@ -375,9 +483,13 @@ def compute_edge_month_metrics(
             ``metrics/getEdgeLinkSeries`` API.
         start_ms: Start timestamp of the month in UTC milliseconds since
             epoch.  Used to assign each sample to a calendar day.
+        include_peak: When ``True``, also compute the 95th percentile of
+            peak (``maxIntervalBps``) throughput and include it as
+            ``monthly_peak_95th_mbps``.
 
     Returns:
-        Dict with 3 keys: ``monthly_{tx,rx,total}_95th_mbps``.
+        Dict with ``monthly_{tx,rx,total}_95th_mbps`` keys, plus
+        ``monthly_peak_95th_mbps`` when ``include_peak`` is ``True``.
         All values are 0 when no sample data is available.
     """
     zero_result = {
@@ -385,6 +497,8 @@ def compute_edge_month_metrics(
         "monthly_rx_95th_mbps": 0,
         "monthly_total_95th_mbps": 0,
     }
+    if include_peak:
+        zero_result["monthly_peak_95th_mbps"] = 0
 
     daily_p95s = compute_daily_p95s(link_series_result, start_ms)
     if not daily_p95s:
@@ -394,11 +508,18 @@ def compute_edge_month_metrics(
     all_daily_rx = [d["rx_p95"] for d in daily_p95s]
     all_daily_total = [d["total_p95"] for d in daily_p95s]
 
-    return {
+    result = {
         "monthly_tx_95th_mbps": percentile_95(all_daily_tx),
         "monthly_rx_95th_mbps": percentile_95(all_daily_rx),
         "monthly_total_95th_mbps": percentile_95(all_daily_total),
     }
+
+    if include_peak:
+        result["monthly_peak_95th_mbps"] = compute_peak_p95(
+            link_series_result, start_ms
+        )
+
+    return result
 
 
 def diagnose_edge_metrics(link_series_result: list[dict]) -> dict:

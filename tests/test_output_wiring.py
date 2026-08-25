@@ -51,7 +51,7 @@ def test_write_month_csvs_produces_csv_via_namespace(tmp_path):
     assert len(csv_paths) == 1
     assert (tmp_path / "vco.test.com.07-2026.csv").exists()
     df = pd.read_csv(csv_paths[0])
-    assert "monthly_tx_95th_mbps" in df.columns
+    assert "30 Days 95th" in df.columns
 
 
 def test_create_zip_archive_produces_zip_via_namespace(tmp_path):

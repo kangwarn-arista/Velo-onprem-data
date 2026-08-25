@@ -4,6 +4,7 @@ import argparse
 import io
 import json
 import logging
+import shutil
 import subprocess
 import sys
 import time
@@ -26,7 +27,7 @@ from metrics import (
     SAMPLES_PER_DAY,
     validate_sample_count,
 )
-from output import write_month_csvs, create_zip_archive
+from output import write_month_csvs, create_zip_archive, create_encrypted_archive, build_output_metadata
 
 urllib3.disable_warnings(urllib3.exceptions.InsecureRequestWarning)
 
@@ -77,6 +78,7 @@ def api_call(method, params, max_retries=5):
 
     data = {"id": 0, "jsonrpc": "2.0", "method": method, "params": params}
 
+    resp = None
     for attempt in range(max_retries):
         try:
             resp = requests.post(
@@ -105,10 +107,7 @@ def api_call(method, params, max_retries=5):
             if "error" in result:
                 error_msg = result["error"]
                 if isinstance(error_msg, dict):
-                    error_code = error_msg.get("code", 0)
                     error_msg = error_msg.get("message", str(error_msg))
-                else:
-                    error_code = 0
                 # Only raise VCOAuthError for known auth error patterns
                 auth_keywords = ["authentication", "unauthorized", "token", "permission"]
                 if any(kw in str(error_msg).lower() for kw in auth_keywords):
@@ -125,6 +124,25 @@ def api_call(method, params, max_retries=5):
         except VCOAuthError:
             raise
         except requests.exceptions.HTTPError as e:
+            if resp is not None and resp.status_code >= 500 and attempt < max_retries - 1:
+                wait = 2 ** attempt
+                logging.warning(
+                    "Server error %s on %s, retrying in %ds (%d/%d)",
+                    resp.status_code, method, wait, attempt + 1, max_retries,
+                )
+                time.sleep(wait)
+                continue
+            logging.error("API Error: %s", e)
+            return {}
+        except (requests.exceptions.ConnectionError, requests.exceptions.Timeout) as e:
+            if attempt < max_retries - 1:
+                wait = 2 ** attempt
+                logging.warning(
+                    "Network error on %s, retrying in %ds (%d/%d): %s",
+                    method, wait, attempt + 1, max_retries, e,
+                )
+                time.sleep(wait)
+                continue
             logging.error("API Error: %s", e)
             return {}
         except Exception as e:
@@ -196,6 +214,8 @@ def get_edge_link_series(
     start_ms: int,
     end_ms: int,
     max_samples: int,
+    *,
+    include_peak_metrics: bool = False,
 ) -> dict:
     """Fetch per-edge link bandwidth time-series data from VCO.
 
@@ -210,35 +230,145 @@ def get_edge_link_series(
         end_ms: Interval end timestamp in UTC milliseconds since epoch.
         max_samples: Maximum number of 5-minute samples to request.
             Computed as ``days_in_month × 288``.
+        include_peak_metrics: When ``True``, also request
+            ``maxIntervalBpsTx``, ``maxIntervalBpsRx``,
+            ``minIntervalBpsTx``, and ``minIntervalBpsRx``.
+            Requires VCO >= 6.4.
 
     Returns:
         The full parsed JSON-RPC response dict. The link series data is at
         response["result"]. Returns an empty dict on API error.
     """
     method = "metrics/getEdgeLinkSeries"
+    metrics = ["bytesTx", "bytesRx"]
+    if include_peak_metrics:
+        metrics.extend([
+            "maxIntervalBpsTx", "maxIntervalBpsRx",
+            "minIntervalBpsTx", "minIntervalBpsRx",
+        ])
     params = {
         "enterpriseId": enterprise_id,
         "edgeId": edge_id,
         "interval": {"start": start_ms, "end": end_ms},
         "maxSamples": max_samples,
-        "metrics": ["bytesTx", "bytesRx"],
+        "metrics": metrics,
     }
     return api_call(method, params)
 
 
-def normalize_token(raw_token: str) -> str:
-    """Prepend the required 'Token ' prefix for the VCO Authorization header.
+def get_vco_version() -> dict:
+    """Fetch VCO software version and build info via the system/getVersionInfo REST API.
 
-    Args:
-        raw_token: The raw API token string from the environment variable.
-            Must not include the 'Token ' prefix.
+    Makes a POST request to ``/portal/rest/system/getVersionInfo`` and
+    returns the ``version`` and ``build`` fields from the response.
 
     Returns:
-        The token string with 'Token ' prefix prepended.
+        Dict with ``version`` (e.g. ``"6.4.2.5"``) and ``build``
+        (e.g. ``"R6135-20260803-0930-GA-9af6dfb8fe"``).  Both values
+        are ``None`` when the call fails.
+    """
+    headers = CaseInsensitiveDict()
+    headers["Authorization"] = token
+    headers["Content-Type"] = "application/json"
+
+    try:
+        resp = requests.post(
+            f"https://{vco_host}/portal/rest/system/getVersionInfo",
+            headers=headers,
+            data="{}",
+            verify=False,
+        )
+        resp.raise_for_status()
+        data = resp.json()
+        return {
+            "version": data.get("version"),
+            "build": data.get("build"),
+        }
+    except Exception as e:
+        logging.warning("Failed to detect VCO version: %s", e)
+        return {"version": None, "build": None}
+
+
+def parse_version_tuple(version_str: str) -> tuple[int, ...]:
+    """Parse a dotted version string into a tuple of integers.
+
+    Args:
+        version_str: Version string such as ``"6.4.2.5"``.
+
+    Returns:
+        Tuple of integers, e.g. ``(6, 4, 2, 5)``.
+
+    Raises:
+        ValueError: If any segment is not a valid integer.
+    """
+    return tuple(int(x) for x in version_str.split("."))
+
+
+def vco_supports_peak_metrics(version_str: str) -> bool:
+    """Return True if the VCO version supports peak BPS metrics (>= 6.4)."""
+    try:
+        parts = parse_version_tuple(version_str)
+        return len(parts) >= 2 and (parts[0], parts[1]) >= (6, 4)
+    except (ValueError, IndexError):
+        return False
+
+
+def normalize_token(raw_token: str) -> str:
+    """Ensure the required 'Token ' prefix is present for the VCO Authorization header.
+
+    Idempotent: if the token already starts with 'Token ', it is returned
+    unchanged.  This prevents the double-prefix bug ('Token Token <value>')
+    that occurs when users copy a token string that already includes the prefix.
+
+    Args:
+        raw_token: The raw API token string from the environment variable or
+            CLI argument.  May or may not include the 'Token ' prefix.
+
+    Returns:
+        The token string with exactly one 'Token ' prefix.
+
+    Raises:
+        ValueError: If ``raw_token`` is empty or falsy.
     """
     if not raw_token:
         raise ValueError("raw_token must be a non-empty string")
+    if raw_token.startswith("Token "):
+        return raw_token
     return f"Token {raw_token}"
+
+
+def package_and_cleanup(output_dir: str, zip_filename: str, metadata: dict) -> str:
+    """Archive CSV files from output_dir into a zip and remove the source directory.
+
+    When the ``OBFUSCATED`` environment variable is set to ``"0"``, creates a
+    plain zip archive.  Otherwise (default), creates an encrypted archive
+    with Fernet-encrypted ``data.enc`` payload.
+
+    The source ``output_dir`` is removed after successful archive creation.
+    If archive creation fails, the source directory is preserved so that
+    data can be recovered without re-collecting from the API.
+
+    Args:
+        output_dir: Path to the directory containing CSV files to archive.
+        zip_filename: Destination path for the output zip file.
+        metadata: Dict written as ``_metadata.json`` inside the archive.
+
+    Returns:
+        The ``zip_filename`` string that was passed in.
+    """
+    if os.getenv("OBFUSCATED") == "0":
+        result = create_zip_archive(output_dir, zip_filename, metadata=metadata)
+    else:
+        result = create_encrypted_archive(output_dir, zip_filename, metadata=metadata)
+    try:
+        shutil.rmtree(output_dir)
+    except OSError as exc:
+        logging.warning(
+            "Failed to remove temp directory %s: %s",
+            output_dir,
+            exc,
+        )
+    return result
 
 
 def build_parser() -> argparse.ArgumentParser:
@@ -330,14 +460,17 @@ if __name__ == "__main__":
         logging.error("--months must be between 1 and 12, got %d", args.months)
         sys.exit(1)
 
-    collect_95th = os.getenv("SKIP_95TH") != "1"
-    if collect_95th:
-        if args.last_30_days:
-            logging.info("95th percentile collection enabled for last 30 days.")
-        else:
-            logging.info("95th percentile collection enabled for %d month(s).", args.months)
+    # -- Detect VCO version --
+    vco_version_info = get_vco_version()
+    vco_version = vco_version_info["version"]
+    vco_build = vco_version_info["build"]
+    if vco_version:
+        logging.info("VCO version: %s (build: %s)", vco_version, vco_build)
     else:
-        logging.info("95th percentile collection disabled.")
+        logging.warning("Could not determine VCO version")
+    peak_supported = vco_supports_peak_metrics(vco_version) if vco_version else False
+
+    collect_95th = os.getenv("SKIP_95TH") != "1"
 
     try:
         enterprise_ids = get_enterprise_ids()
@@ -473,8 +606,9 @@ if __name__ == "__main__":
         target_name = args.diagnose.strip()
         logging.info("Diagnose mode: searching for edge '%s'", target_name)
 
-        # Find the edge across all enterprises
-        matched_edge = None
+        # Find the edge across all enterprises — collect all matches so we
+        # can warn when multiple enterprises contain edges with the same name.
+        matched_edges: list[dict] = []
         all_edge_names: list[str] = []
         for ent in enterprise_ids:
             edges = get_edges(ent)
@@ -483,20 +617,31 @@ if __name__ == "__main__":
                 name = edge.get("name", "")
                 all_edge_names.append(f"  {name} ({ent['name']})")
                 if name.lower() == target_name.lower():
-                    matched_edge = {
+                    matched_edges.append({
                         "enterprise_id": ent["id"],
                         "enterprise_name": ent["name"],
                         "edge_id": edge.get("id"),
                         "edge_name": name,
                         "edge_state": edge.get("edgeState", "UNKNOWN"),
                         "serial_number": edge.get("serialNumber", ""),
-                    }
+                    })
 
-        if not matched_edge:
+        if not matched_edges:
             print(f"\nEdge '{target_name}' not found. Available edges:")
             for en in sorted(all_edge_names):
                 print(en)
             sys.exit(1)
+
+        if len(matched_edges) > 1:
+            print(f"WARNING: {len(matched_edges)} edges match '{target_name}':")
+            for me in matched_edges:
+                print(
+                    f"  {me['edge_name']} "
+                    f"(enterprise: {me['enterprise_name']}, id: {me['edge_id']})"
+                )
+            print("Using the first match. Use a unique edge name to avoid ambiguity.")
+
+        matched_edge = matched_edges[0]
 
         print(f"\n{'=' * 60}")
         print(f"DIAGNOSTIC REPORT: {matched_edge['edge_name']}")
@@ -596,11 +741,6 @@ if __name__ == "__main__":
         edge_info_list = deduped_edge_info_list
 
         target_months = get_last_30_days() if args.last_30_days else get_target_months(args.months)
-        print(
-            f"\nCollecting 95th percentile metrics for "
-            f"{'last 30 days' if args.last_30_days else f'{len(target_months)} month(s)'}: "
-            f"{', '.join(m['label'] for m in target_months)}"
-        )
         metrics_results = []
         for edge_info in edge_info_list:
             print(
@@ -620,6 +760,7 @@ if __name__ == "__main__":
                         month["start_ms"],
                         month["end_ms"],
                         samples,
+                        include_peak_metrics=peak_supported,
                     )
                     link_series = response.get("result") or []
                     validation = validate_sample_count(
@@ -632,7 +773,10 @@ if __name__ == "__main__":
                             month["label"],
                             validation["links"],
                         )
-                    metrics = compute_edge_month_metrics(link_series, month["start_ms"])
+                    metrics = compute_edge_month_metrics(
+                        link_series, month["start_ms"],
+                        include_peak=peak_supported,
+                    )
                     metrics_results.append(
                         {
                             "enterprise_name": edge_info["enterprise_name"],
@@ -641,18 +785,6 @@ if __name__ == "__main__":
                             **metrics,
                         }
                     )
-                    if args.all_metrics:
-                        print(
-                            f"    {month['label']}: "
-                            f"p95 tx={metrics['monthly_tx_95th_mbps']:.0f} "
-                            f"rx={metrics['monthly_rx_95th_mbps']:.0f} "
-                            f"total={metrics['monthly_total_95th_mbps']:.0f} Mbps"
-                        )
-                    else:
-                        print(
-                            f"    {month['label']}: "
-                            f"p95 total={metrics['monthly_total_95th_mbps']:.0f} Mbps"
-                        )
                 except VCOAuthError:
                     raise
                 except Exception as e:
@@ -663,33 +795,20 @@ if __name__ == "__main__":
                         month["label"],
                         e,
                     )
-        print(
-            f"\n95th percentile collection complete: "
-            f"{len(metrics_results)} edge-month records computed"
-        )
-
         if not metrics_results:
             print("No metrics data collected -- skipping output packaging")
         else:
             timestamp = datetime.now().strftime("%Y%m%d_%H%M%S")
-            output_dir = f"{vco_host}_metrics_v{VERSION}_{timestamp}"
+            output_dir = f"{vco_host}_v{VERSION}_{timestamp}"
             os.makedirs(output_dir, exist_ok=True)
             csv_paths = write_month_csvs(
                 merged_df, metrics_results, target_months, vco_host, output_dir,
                 all_metrics=args.all_metrics,
+                include_peak=peak_supported,
             )
-            print(f"  Wrote {len(csv_paths)} CSV file(s) to {output_dir}/")
             zip_filename = f"{output_dir}.zip"
-            metadata = {
-                "version": VERSION,
-                "vco_host": vco_host,
-                "generated_at": timestamp,
-                "months": args.months if not args.last_30_days else None,
-                "last_30_days": args.last_30_days,
-                "all_metrics": args.all_metrics,
-                "enterprises": len(enterprise_ids),
-                "edges": len(edge_info_list),
-                "edge_month_records": len(metrics_results),
-            }
-            zip_path = create_zip_archive(output_dir, zip_filename, metadata=metadata)
-            print(f"Metrics archive created: {zip_path}")
+            metadata = build_output_metadata(
+                VERSION, vco_host, timestamp,
+                vco_version=vco_version, vco_build=vco_build,
+            )
+            package_and_cleanup(output_dir, zip_filename, metadata)

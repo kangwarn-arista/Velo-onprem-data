@@ -9,10 +9,10 @@ from vco_edge_export import build_parser
 
 
 def test_default_values():
-    """parse_args([]) yields months=1, strict_validation=False, no overrides."""
+    """parse_args([]) yields months=3, strict_validation=False, no overrides."""
     parser = build_parser()
     args = parser.parse_args([])
-    assert args.months == 1
+    assert args.months == 3
     assert args.strict_validation is False
     assert args.vco_host is None
     assert args.vco_token is None
