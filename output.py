@@ -8,6 +8,7 @@ data structures and the filesystem.
 """
 import io
 import json
+import math
 import zipfile
 from pathlib import Path
 from urllib.parse import urlparse
@@ -187,6 +188,94 @@ def write_month_csvs(
         csv_paths.append(full_path)
 
     return csv_paths
+
+
+def write_combined_csv(
+    merged_df: pd.DataFrame,
+    metrics_results: list[dict],
+    target_months: list[dict],
+    vco_name: str,
+    output_dir: str,
+    *,
+    include_peak: bool = False,
+) -> str:
+    """Write a single CSV file with one row per edge and a Record Hash column.
+
+    Produces a combined CSV named ``{vco_name}.combined.csv`` where metric
+    columns are replaced by an obfuscated Record Hash computed by
+    :func:`encoder.encode_record_hash`.  The Record Hash encodes per-month
+    95th percentile bandwidth metrics into a fixed-length 344-character
+    base64 string.  Edges with an empty or missing UUID receive the
+    ``SENTINEL_HASH`` value.
+
+    The output CSV retains all columns from ``merged_df`` and adds a
+    ``"Record Hash"`` column.  The per-month metric columns (``Month-Year``,
+    ``30 Days 95th``, ``30 Days P95 Peak``) are NOT included — the Record
+    Hash is the sole summary of metric data per edge.
+
+    CSV files are written with UTF-8 BOM encoding (``utf-8-sig``), matching
+    the convention used by :func:`write_month_csvs`.
+
+    Args:
+        merged_df: DataFrame containing the merged license and edge status
+            data.  Must include at least ``"Customer Name"``,
+            ``"Edge Name"``, and ``"Edge UUID"`` columns.
+        metrics_results: List of dicts, each with keys ``enterprise_name``,
+            ``edge_name``, ``month_label``, ``monthly_total_95th_mbps``,
+            and optionally ``monthly_peak_95th_mbps``.
+        target_months: List of month dicts, each with a ``"label"`` key
+            (format ``"MM-YYYY"`` or ``"last30d"``).
+        vco_name: VCO hostname string used as the CSV filename prefix.
+        output_dir: Directory path where the CSV file will be written.
+        include_peak: When ``True``, encode peak P95 data into the Record
+            Hash.  When ``False``, the peak slot uses NaN (encoded as
+            ``-1.0`` sentinel).
+
+    Returns:
+        Absolute file path (as string) for the written CSV file.
+    """
+    # Deferred import — same pattern as create_encrypted_archive importing from crypto
+    from encoder import encode_record_hash
+
+    # Build O(1) metrics lookup: (Customer Name, Edge Name, month_label) → record
+    metrics_lookup: dict[tuple[str, str, str], dict] = {}
+    for record in metrics_results:
+        key = (record["enterprise_name"], record["edge_name"], record["month_label"])
+        metrics_lookup[key] = record
+
+    result_df = merged_df.copy()
+    record_hashes: list[str] = []
+
+    for _, row in result_df.iterrows():
+        customer_name = row["Customer Name"]
+        edge_name = row["Edge Name"]
+        raw_uuid = row.get("Edge UUID", "")
+        edge_uuid = "" if (raw_uuid is None or (isinstance(raw_uuid, float) and math.isnan(raw_uuid))) else str(raw_uuid)
+
+        months_data: list[dict] = []
+        for month in target_months:
+            month_label = month["label"]
+            record = metrics_lookup.get((customer_name, edge_name, month_label))
+            if record is not None:
+                p95 = record.get("monthly_total_95th_mbps", float("nan"))
+                peak = (
+                    record.get("monthly_peak_95th_mbps", float("nan"))
+                    if include_peak
+                    else float("nan")
+                )
+            else:
+                p95 = float("nan")
+                peak = float("nan")
+            months_data.append({"label": month_label, "95th": p95, "peak": peak})
+
+        record_hashes.append(encode_record_hash(months_data, edge_uuid))
+
+    result_df["Record Hash"] = record_hashes
+
+    filename = f"{vco_name}.combined.csv"
+    full_path = str(Path(output_dir) / filename)
+    result_df.to_csv(full_path, index=False, encoding="utf-8-sig")
+    return full_path
 
 
 def create_zip_archive(

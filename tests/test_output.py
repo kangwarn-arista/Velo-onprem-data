@@ -9,7 +9,8 @@ import zipfile
 import pandas as pd
 import pytest
 
-from output import create_zip_archive, extract_vco_name, write_month_csvs
+from encoder import SENTINEL_HASH
+from output import create_zip_archive, extract_vco_name, write_combined_csv, write_month_csvs
 
 
 # ── extract_vco_name ───────────────────────────────────────────────────────
@@ -329,3 +330,168 @@ class TestCreateZipArchive:
         result = create_zip_archive(str(csv_dir), zip_path)
 
         assert result == zip_path
+
+
+# ── write_combined_csv ─────────────────────────────────────────────────────
+
+
+class TestWriteCombinedCsv:
+    """Tests for combined single-CSV generation with Record Hash column."""
+
+    def _make_merged_df(self):
+        """Build a minimal merged_df with 2 rows."""
+        return pd.DataFrame(
+            {
+                "Customer Name": ["Acme Corp", "Beta Inc"],
+                "Edge Name": ["edge-01", "edge-02"],
+                "Edge UUID": ["uuid-aaa-111", "uuid-bbb-222"],
+                "Edge Status": ["CONNECTED", "OFFLINE"],
+            }
+        )
+
+    def _make_target_months_one(self):
+        """Build a single target_months list for July 2026."""
+        return [
+            {
+                "label": "07-2026",
+                "year": 2026,
+                "month": 7,
+                "start_ms": 0,
+                "end_ms": 0,
+            }
+        ]
+
+    def _make_metrics_results_one(self):
+        """Build metrics_results with entries for both edges for July 2026."""
+        return [
+            {
+                "enterprise_name": "Acme Corp",
+                "edge_name": "edge-01",
+                "month_label": "07-2026",
+                "monthly_tx_95th_mbps": 1.5,
+                "monthly_rx_95th_mbps": 2.5,
+                "monthly_total_95th_mbps": 4.0,
+                "monthly_peak_95th_mbps": 10.0,
+            },
+            {
+                "enterprise_name": "Beta Inc",
+                "edge_name": "edge-02",
+                "month_label": "07-2026",
+                "monthly_tx_95th_mbps": 0.5,
+                "monthly_rx_95th_mbps": 0.8,
+                "monthly_total_95th_mbps": 1.3,
+                "monthly_peak_95th_mbps": 5.0,
+            },
+        ]
+
+    def test_produces_single_csv_file(self, tmp_path):
+        """write_combined_csv creates exactly 1 file named {vco_name}.combined.csv."""
+        merged_df = self._make_merged_df()
+        metrics_results = self._make_metrics_results_one()
+        target_months = self._make_target_months_one()
+
+        result = write_combined_csv(
+            merged_df, metrics_results, target_months, "vco.test.com", str(tmp_path)
+        )
+
+        assert (tmp_path / "vco.test.com.combined.csv").exists()
+        assert result == str(tmp_path / "vco.test.com.combined.csv")
+
+    def test_csv_has_record_hash_column(self, tmp_path):
+        """The written CSV contains a 'Record Hash' column."""
+        merged_df = self._make_merged_df()
+        metrics_results = self._make_metrics_results_one()
+        target_months = self._make_target_months_one()
+
+        write_combined_csv(
+            merged_df, metrics_results, target_months, "vco.test.com", str(tmp_path)
+        )
+
+        df = pd.read_csv(tmp_path / "vco.test.com.combined.csv")
+        assert "Record Hash" in df.columns
+
+    def test_csv_has_no_metric_columns(self, tmp_path):
+        """The combined CSV does NOT have per-month metric display columns."""
+        merged_df = self._make_merged_df()
+        metrics_results = self._make_metrics_results_one()
+        target_months = self._make_target_months_one()
+
+        write_combined_csv(
+            merged_df, metrics_results, target_months, "vco.test.com", str(tmp_path)
+        )
+
+        df = pd.read_csv(tmp_path / "vco.test.com.combined.csv")
+        assert "Month-Year" not in df.columns
+        assert "30 Days 95th" not in df.columns
+        assert "30 Days P95 Peak" not in df.columns
+
+    def test_csv_has_all_merged_columns(self, tmp_path):
+        """Every column from merged_df is present in the combined CSV."""
+        merged_df = self._make_merged_df()
+        metrics_results = self._make_metrics_results_one()
+        target_months = self._make_target_months_one()
+
+        write_combined_csv(
+            merged_df, metrics_results, target_months, "vco.test.com", str(tmp_path)
+        )
+
+        df = pd.read_csv(tmp_path / "vco.test.com.combined.csv")
+        for col in merged_df.columns:
+            assert col in df.columns
+
+    def test_one_row_per_edge(self, tmp_path):
+        """The combined CSV has exactly one row per edge (same count as merged_df)."""
+        merged_df = self._make_merged_df()
+        metrics_results = self._make_metrics_results_one()
+        target_months = self._make_target_months_one()
+
+        write_combined_csv(
+            merged_df, metrics_results, target_months, "vco.test.com", str(tmp_path)
+        )
+
+        df = pd.read_csv(tmp_path / "vco.test.com.combined.csv")
+        assert len(df) == len(merged_df)
+
+    def test_record_hash_length(self, tmp_path):
+        """Every Record Hash value in the combined CSV is exactly 344 characters."""
+        merged_df = self._make_merged_df()
+        metrics_results = self._make_metrics_results_one()
+        target_months = self._make_target_months_one()
+
+        write_combined_csv(
+            merged_df, metrics_results, target_months, "vco.test.com", str(tmp_path)
+        )
+
+        df = pd.read_csv(tmp_path / "vco.test.com.combined.csv")
+        assert (df["Record Hash"].str.len() == 344).all()
+
+    def test_empty_uuid_gets_sentinel(self, tmp_path):
+        """An edge with empty Edge UUID gets SENTINEL_HASH as its Record Hash."""
+        merged_df = pd.DataFrame(
+            {
+                "Customer Name": ["Sentinel Corp"],
+                "Edge Name": ["edge-sentinel"],
+                "Edge UUID": [""],
+                "Edge Status": ["CONNECTED"],
+            }
+        )
+        target_months = self._make_target_months_one()
+
+        write_combined_csv(
+            merged_df, [], target_months, "vco.test.com", str(tmp_path)
+        )
+
+        df = pd.read_csv(tmp_path / "vco.test.com.combined.csv")
+        assert df["Record Hash"].iloc[0] == SENTINEL_HASH
+
+    def test_edge_with_no_metrics(self, tmp_path):
+        """An edge with no metrics_results entry still produces a valid 344-char Record Hash."""
+        merged_df = self._make_merged_df()
+        target_months = self._make_target_months_one()
+
+        write_combined_csv(
+            merged_df, [], target_months, "vco.test.com", str(tmp_path)
+        )
+
+        df = pd.read_csv(tmp_path / "vco.test.com.combined.csv")
+        assert (df["Record Hash"].str.len() == 344).all()

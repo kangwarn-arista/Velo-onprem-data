@@ -18,10 +18,18 @@ import vco_edge_export
 
 def test_output_imports_present():
     """Output module functions are importable from the vco_edge_export namespace."""
-    from vco_edge_export import create_zip_archive, write_month_csvs
+    from vco_edge_export import create_zip_archive, write_combined_csv, write_month_csvs
 
     assert callable(write_month_csvs)
     assert callable(create_zip_archive)
+    assert callable(write_combined_csv)
+
+
+def test_write_combined_csv_import_present():
+    """write_combined_csv is importable from the vco_edge_export namespace."""
+    from vco_edge_export import write_combined_csv
+
+    assert callable(write_combined_csv)
 
 
 # ── real invocation through vco_edge_export namespace ─────────────────────
@@ -67,3 +75,39 @@ def test_create_zip_archive_produces_zip_via_namespace(tmp_path):
     assert result.endswith(".zip")
     with zipfile.ZipFile(zip_path, "r") as zf:
         assert "test.csv" in zf.namelist()
+
+
+def test_write_combined_csv_produces_csv_via_namespace(tmp_path):
+    """write_combined_csv called through vco_edge_export creates a CSV with Record Hash column."""
+    merged_df = pd.DataFrame(
+        {
+            "Customer Name": ["Acme Corp", "Beta Inc"],
+            "Edge Name": ["edge-01", "edge-02"],
+            "Edge UUID": [
+                "aaaaaaaa-0000-0000-0000-000000000001",
+                "bbbbbbbb-0000-0000-0000-000000000002",
+            ],
+            "Edge Status": ["CONNECTED", "OFFLINE"],
+        }
+    )
+    metrics_results = [
+        {
+            "enterprise_name": "Acme Corp",
+            "edge_name": "edge-01",
+            "month_label": "07-2026",
+            "monthly_tx_95th_mbps": 1.5,
+            "monthly_rx_95th_mbps": 2.5,
+            "monthly_total_95th_mbps": 4.0,
+        }
+    ]
+    target_months = [{"label": "07-2026"}]
+
+    csv_path = vco_edge_export.write_combined_csv(
+        merged_df, metrics_results, target_months, "vco.test.com", str(tmp_path)
+    )
+
+    assert csv_path.endswith(".csv")
+    import os as _os
+    assert _os.path.exists(csv_path)
+    df = pd.read_csv(csv_path)
+    assert "Record Hash" in df.columns

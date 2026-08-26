@@ -1,7 +1,8 @@
 """Tests for pipeline encryption wiring and temp directory cleanup.
 
-Covers: OBFUSCATED env var branching, temp directory cleanup after
-archive creation in both encrypted and unencrypted paths.
+Covers: OBFUSCATED env var branching (3-mode: 0=plain, 1=plain, 2=Fernet),
+temp directory cleanup after archive creation in both encrypted and
+unencrypted paths.
 """
 
 import os
@@ -25,8 +26,8 @@ class TestObfuscatedBranching:
         (csv_dir / "vco.test.com.07-2026.csv").write_text("col1,col2\n1,2\n")
         return csv_dir
 
-    def test_default_calls_encrypted(self, tmp_path):
-        """When OBFUSCATED is unset (default), the pipeline calls create_encrypted_archive."""
+    def test_default_calls_plain_zip(self, tmp_path):
+        """When OBFUSCATED is unset (default), the pipeline calls create_zip_archive."""
         csv_dir = self._make_csv_dir(tmp_path)
         zip_path = str(tmp_path / "out.zip")
         metadata = {"version": "1.0"}
@@ -37,8 +38,8 @@ class TestObfuscatedBranching:
                  patch("vco_edge_export.create_zip_archive", wraps=__import__("output").create_zip_archive) as mock_zip:
                 package_and_cleanup(str(csv_dir), zip_path, metadata)
 
-        mock_enc.assert_called_once()
-        mock_zip.assert_not_called()
+        mock_zip.assert_called_once()
+        mock_enc.assert_not_called()
 
     def test_obfuscated_zero_calls_plain_zip(self, tmp_path):
         """When OBFUSCATED is '0', the pipeline calls create_zip_archive."""
@@ -54,13 +55,27 @@ class TestObfuscatedBranching:
         mock_zip.assert_called_once()
         mock_enc.assert_not_called()
 
-    def test_obfuscated_one_calls_encrypted(self, tmp_path):
-        """When OBFUSCATED is '1' (non-zero), the pipeline calls create_encrypted_archive."""
+    def test_obfuscated_one_calls_plain_zip(self, tmp_path):
+        """When OBFUSCATED is '1', the pipeline calls create_zip_archive (field-level mode)."""
         csv_dir = self._make_csv_dir(tmp_path)
         zip_path = str(tmp_path / "out.zip")
         metadata = {"version": "1.0"}
 
         with patch.dict(os.environ, {"OBFUSCATED": "1"}):
+            with patch("vco_edge_export.create_encrypted_archive", wraps=__import__("output").create_encrypted_archive) as mock_enc, \
+                 patch("vco_edge_export.create_zip_archive", wraps=__import__("output").create_zip_archive) as mock_zip:
+                package_and_cleanup(str(csv_dir), zip_path, metadata)
+
+        mock_zip.assert_called_once()
+        mock_enc.assert_not_called()
+
+    def test_obfuscated_two_calls_encrypted(self, tmp_path):
+        """When OBFUSCATED is '2', the pipeline calls create_encrypted_archive (Fernet path)."""
+        csv_dir = self._make_csv_dir(tmp_path)
+        zip_path = str(tmp_path / "out.zip")
+        metadata = {"version": "1.0"}
+
+        with patch.dict(os.environ, {"OBFUSCATED": "2"}):
             with patch("vco_edge_export.create_encrypted_archive", wraps=__import__("output").create_encrypted_archive) as mock_enc, \
                  patch("vco_edge_export.create_zip_archive", wraps=__import__("output").create_zip_archive) as mock_zip:
                 package_and_cleanup(str(csv_dir), zip_path, metadata)
@@ -83,13 +98,12 @@ class TestTempDirectoryCleanup:
         return csv_dir
 
     def test_encrypted_path_cleans_temp_dir(self, tmp_path):
-        """After archive creation (encrypted path), the source output_dir no longer exists."""
+        """After archive creation (encrypted path, OBFUSCATED=2), the source output_dir no longer exists."""
         csv_dir = self._make_csv_dir(tmp_path)
         zip_path = str(tmp_path / "out.zip")
         metadata = {"version": "1.0"}
 
-        with patch.dict(os.environ, {}, clear=False):
-            os.environ.pop("OBFUSCATED", None)
+        with patch.dict(os.environ, {"OBFUSCATED": "2"}):
             package_and_cleanup(str(csv_dir), zip_path, metadata)
 
         assert not csv_dir.exists()

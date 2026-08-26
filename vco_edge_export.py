@@ -27,7 +27,7 @@ from metrics import (
     SAMPLES_PER_DAY,
     validate_sample_count,
 )
-from output import write_month_csvs, create_zip_archive, create_encrypted_archive, build_output_metadata
+from output import write_month_csvs, write_combined_csv, create_zip_archive, create_encrypted_archive, build_output_metadata
 
 urllib3.disable_warnings(urllib3.exceptions.InsecureRequestWarning)
 
@@ -337,12 +337,21 @@ def normalize_token(raw_token: str) -> str:
     return f"Token {raw_token}"
 
 
-def package_and_cleanup(output_dir: str, zip_filename: str, metadata: dict) -> str:
+def package_and_cleanup(
+    output_dir: str,
+    zip_filename: str,
+    metadata: dict,
+    *,
+    obfuscation_mode: str = "1",
+) -> str:
     """Archive CSV files from output_dir into a zip and remove the source directory.
 
-    When the ``OBFUSCATED`` environment variable is set to ``"0"``, creates a
-    plain zip archive.  Otherwise (default), creates an encrypted archive
-    with Fernet-encrypted ``data.enc`` payload.
+    Three-mode routing via ``obfuscation_mode``:
+
+    - ``"2"`` — creates a Fernet-encrypted archive (``data.enc``
+      payload inside the zip).
+    - All other values (including ``"0"``, ``"1"``) — creates a plain
+      zip archive with CSV files directly inside.
 
     The source ``output_dir`` is removed after successful archive creation.
     If archive creation fails, the source directory is preserved so that
@@ -352,14 +361,15 @@ def package_and_cleanup(output_dir: str, zip_filename: str, metadata: dict) -> s
         output_dir: Path to the directory containing CSV files to archive.
         zip_filename: Destination path for the output zip file.
         metadata: Dict written as ``_metadata.json`` inside the archive.
+        obfuscation_mode: Output mode string (default ``"1"``).
 
     Returns:
         The ``zip_filename`` string that was passed in.
     """
-    if os.getenv("OBFUSCATED") == "0":
-        result = create_zip_archive(output_dir, zip_filename, metadata=metadata)
-    else:
+    if obfuscation_mode == "2":
         result = create_encrypted_archive(output_dir, zip_filename, metadata=metadata)
+    else:
+        result = create_zip_archive(output_dir, zip_filename, metadata=metadata)
     try:
         shutil.rmtree(output_dir)
     except OSError as exc:
@@ -439,6 +449,10 @@ if __name__ == "__main__":
     logging.basicConfig(level=logging.INFO, format="%(levelname)s: %(message)s")
 
     args = build_parser().parse_args()
+
+    # Determine obfuscation mode once; used throughout to gate CSV writes and
+    # route output functions.  Default "1" = field-level obfuscation (mode 1).
+    obfuscation_mode = os.getenv("OBFUSCATED", "1")
 
     print(f"vco_edge_export v{VERSION}")
 
@@ -595,11 +609,12 @@ if __name__ == "__main__":
     merged_df["Edge UUID"] = merged_df["Edge UUID"].fillna("")
     merged_df["Edge Status"] = merged_df["Edge Status"].fillna("")
 
-    merged_df.to_csv(OUTPUT_CSV, index=False, encoding="utf-8-sig")
-    print(
-        f"Done. {len(merged_df)} rows written to '{OUTPUT_CSV}' "
-        f"({matched_count} matched, {unmatched_count} unmatched)"
-    )
+    if obfuscation_mode != "1":
+        merged_df.to_csv(OUTPUT_CSV, index=False, encoding="utf-8-sig")
+        print(
+            f"Done. {len(merged_df)} rows written to '{OUTPUT_CSV}' "
+            f"({matched_count} matched, {unmatched_count} unmatched)"
+        )
 
     # -- Diagnose mode --
     if args.diagnose:
@@ -801,14 +816,20 @@ if __name__ == "__main__":
             timestamp = datetime.now().strftime("%Y%m%d_%H%M%S")
             output_dir = f"{vco_host}_v{VERSION}_{timestamp}"
             os.makedirs(output_dir, exist_ok=True)
-            csv_paths = write_month_csvs(
-                merged_df, metrics_results, target_months, vco_host, output_dir,
-                all_metrics=args.all_metrics,
-                include_peak=peak_supported,
-            )
+            if obfuscation_mode == "1":
+                write_combined_csv(
+                    merged_df, metrics_results, target_months, vco_host, output_dir,
+                    include_peak=peak_supported,
+                )
+            else:
+                write_month_csvs(
+                    merged_df, metrics_results, target_months, vco_host, output_dir,
+                    all_metrics=args.all_metrics,
+                    include_peak=peak_supported,
+                )
             zip_filename = f"{output_dir}.zip"
             metadata = build_output_metadata(
                 VERSION, vco_host, timestamp,
                 vco_version=vco_version, vco_build=vco_build,
             )
-            package_and_cleanup(output_dir, zip_filename, metadata)
+            package_and_cleanup(output_dir, zip_filename, metadata, obfuscation_mode=obfuscation_mode)

@@ -2,11 +2,17 @@
 
 ## What This Is
 
-Python CLI tools that export device, license, and bandwidth data from VMware VeloCloud Orchestrator (VCO) on-premises instances via JSON-RPC 2.0 API. Outputs styled Excel spreadsheets and CSV files with optional 95th percentile bandwidth metrics. Used internally by Arista for VCO fleet auditing and reporting.
+Python CLI tools that export device, license, and bandwidth data from VMware VeloCloud Orchestrator (VCO) on-premises instances via JSON-RPC 2.0 API. Outputs CSV files with optional 95th percentile bandwidth metrics, field-level obfuscation by default, and standalone offline decryption. Used internally by Arista for VCO fleet auditing and reporting.
 
 ## Core Value
 
-Reliable, automated extraction of edge device and bandwidth metrics from on-prem VCO instances into analyst-friendly formats (Excel/CSV).
+Reliable, automated extraction of edge device and bandwidth metrics from on-prem VCO instances into analyst-friendly formats (CSV), with obfuscation to prevent casual exposure of sensitive metrics.
+
+## Current State
+
+**Shipped:** v1.5 (2026-08-25)
+
+The tool now defaults to field-level obfuscation (OBFUSCATED=1): a single combined CSV per VCO with all months packed into a 344-char Record Hash column. Three modes are available: 0=plaintext, 1=field-level (default), 2=Fernet encryption. The standalone `decrypt_metrics.py` auto-detects and reverses both field-level and Fernet formats back to per-month metric CSVs.
 
 ## Requirements
 
@@ -25,43 +31,50 @@ Reliable, automated extraction of edge device and bandwidth metrics from on-prem
 - ✓ **BUILD-01**: Version tracking from git tags with metadata in output — v1.3
 - ✓ **BUILD-02**: Package target for release bundling — v1.3
 - ✓ **METRICS-01**: Align metrics calculation with PowerBI rounding logic — v1.3
+- ✓ **LOG-01**: Suppress p95 metric values from stdout/logs — v1.4
+- ✓ **LOG-02**: Suppress month count/collection mode from stdout/logs — v1.4
+- ✓ **LOG-03**: Suppress temp directory/file paths from stdout/logs — v1.4
+- ✓ **LOG-04**: Preserve edge processing progress output — v1.4
+- ✓ **LOG-05**: Sanitize _metadata.json to exclude sensitive fields — v1.4
+- ✓ **ENC-01**: Compress-then-encrypt CSV output using Fernet — v1.4
+- ✓ **ENC-02**: Final archive contains only _metadata.json and data.enc — v1.4
+- ✓ **ENC-03**: Encryption is default; bypass with OBFUSCATED=0 — v1.4
+- ✓ **ENC-04**: Temp cleanup after encryption — v1.4
+- ✓ **DEC-01**: Standalone offline decryption script (no project imports) — v1.4
+- ✓ **DEC-02**: Decrypted CSVs byte-for-byte identical to originals — v1.4
+- ✓ **MODE-01**: 3-mode obfuscation routing (0/1/2) — v1.5
+- ✓ **MODE-02**: Field-level obfuscation as default — v1.5
+- ✓ **MODE-03**: Fernet mode backward-compatible — v1.5
+- ✓ **MODE-04**: Sentinel Record Hash for empty UUID edges — v1.5
+- ✓ **ENC-05**: Record Hash encodes metrics into fixed-length value — v1.5
+- ✓ **ENC-06**: Record Hash exactly 344 characters — v1.5
+- ✓ **ENC-07**: Per-edge unique Record Hash via UUID XOR key — v1.5
+- ✓ **ENC-08**: Versioned extensible binary struct format — v1.5
+- ✓ **OUT-01**: Combined CSV with one row per edge — v1.5
+- ✓ **OUT-02**: Non-sensitive columns preserved in combined CSV — v1.5
+- ✓ **OUT-03**: vco_edge_export.csv suppressed in default mode — v1.5
+- ✓ **DEC-03**: Auto-detect archive format in decrypt_metrics.py — v1.5
+- ✓ **DEC-04**: Decode Record Hash to original metric columns — v1.5
+- ✓ **DEC-05**: decrypt_metrics.py remains standalone (zero imports) — v1.5
+- ✓ **DEC-06**: Fernet decryption still works after changes — v1.5
+- ✓ **TEST-01**: Round-trip fidelity for zero/max/normal values — v1.5
+- ✓ **TEST-02**: Partial month data encodes/decodes correctly — v1.5
 
 ### Active
 
-- ✓ **LOG-01**: Suppress p95 metric values from stdout/logs — v1.4 Phase 1
-- ✓ **LOG-02**: Suppress month count/collection mode from stdout/logs — v1.4 Phase 1
-- ✓ **LOG-03**: Suppress temp directory/file paths from stdout/logs — v1.4 Phase 1
-- ✓ **LOG-04**: Preserve edge processing progress output — v1.4 Phase 1
-- ✓ **LOG-05**: Sanitize _metadata.json to exclude sensitive fields — v1.4 Phase 1
-
-- ✓ **DEC-01**: Standalone offline decryption script (no project imports) — v1.4 Phase 3
-- ✓ **DEC-02**: Decrypted CSVs byte-for-byte identical to originals — v1.4 Phase 3
-
-(See REQUIREMENTS.md for remaining v1.4 scope: ENC-01–04)
+(None — no active milestone)
 
 ### Out of Scope
 
 (None defined yet)
 
-## Current Milestone: v1.4 Obfuscation
-
-**Goal:** Encrypt/obfuscate the output pipeline by default so sensitive 95th percentile metrics are never exposed in logs, temp files, or output archives — with a separate offline decryption tool for authorized recovery.
-
-**Target features:**
-- Suppress sensitive stdout/logs while preserving edge processing progress
-- Sanitize metadata to exclude sensitive fields
-- Ensure temp file/directory cleanup with no path leakage
-- Encrypt output archive contents by default
-- Provide offline decryption script for authorized metric recovery
-
 ## Context
 
 - **Tech stack**: Python 3.13+, uv package manager, pandas, openpyxl, requests
 - **API**: VCO JSON-RPC 2.0 over HTTPS (self-signed certs, SSL verify disabled)
-- **Auth**: API token via .env file (VCO_URL, VCO_TOKEN)
+- **Auth**: API token via .env file (VCO_HOST, VCO_TOKEN)
 - **Distribution**: Nuitka/PyInstaller for standalone binary builds
-- **Prior milestones**: v1.0 (core export), v1.1 (metrics enhancements + comparison tool), v1.2 (quick enhancements), v1.3 (build/packaging/rounding)
-- **v1.4 milestone**: Output obfuscation/encryption with offline decryption tooling
+- **Prior milestones**: v1.0 (core export), v1.1 (metrics enhancements + comparison tool), v1.2 (quick enhancements), v1.3 (build/packaging/rounding), v1.4 (obfuscation/encryption), v1.5 (field-level obfuscation)
 
 ## Constraints
 
@@ -77,6 +90,13 @@ Reliable, automated extraction of edge device and bandwidth metrics from on-prem
 | Disable SSL verify | On-prem VCO uses self-signed certs | ✓ Good |
 | Nuitka for binary builds | Reliable single-file executables | ✓ Good |
 | Align rounding with PowerBI | Users compare VCO export with PowerBI dashboards | ✓ Good |
+| Fernet with static embedded key | Obfuscation-grade sufficient; upgrade path exists | ✓ Good |
+| OBFUSCATED env var for bypass | Simple toggle for authorized plaintext access | ✓ Good |
+| Standalone decrypt_metrics.py | Zero project imports for offline field use | ✓ Good |
+| Metadata limited to 3 keys | Prevent information disclosure in output archive | ✓ Good |
+| 256-byte struct with version field | Fixed-size output, extensible for future fields (FMT-01/02) | ✓ Good |
+| XOR with SHA-256(UUID) | Per-edge uniqueness without HMAC overhead; obfuscation-grade | ✓ Good |
+| Combined CSV (one row per edge) | Eliminates per-month file proliferation; simpler to handle | ✓ Good |
 
 ## Evolution
 
@@ -96,4 +116,4 @@ This document evolves at phase transitions and milestone boundaries.
 4. Update Context with current state
 
 ---
-*Last updated: 2026-08-22 after Phase 3 (Decryption Tooling) completion*
+*Last updated: 2026-08-25 after v1.5 milestone completed*
