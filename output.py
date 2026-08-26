@@ -17,6 +17,36 @@ from urllib.parse import urlparse
 import pandas as pd
 
 
+FEDERAL_REDACT_COLUMNS = [
+    "Product Version",
+    "Partner Id",
+    "Partner Name",
+    "Customer Name",
+    "Edge Name",
+    "Edge Custom Info",
+    "Edge Description",
+    "Customer Account",
+    "Customer City",
+    "Customer State",
+    "Customer Country",
+    "Customer Email Domain(s)",
+    "Partner Email Domain(s)",
+    "HA",
+    "Bandwidth",
+    "Edition",
+    "Term",
+    "Region",
+]
+
+
+def apply_federal_redaction(df: pd.DataFrame) -> pd.DataFrame:
+    """Blank columns listed in FEDERAL_REDACT_COLUMNS, in-place."""
+    for col in FEDERAL_REDACT_COLUMNS:
+        if col in df.columns:
+            df[col] = ""
+    return df
+
+
 def build_output_metadata(
     version: str,
     vco_host: str,
@@ -105,6 +135,7 @@ def write_month_csvs(
     *,
     all_metrics: bool = False,
     include_peak: bool = False,
+    federal: bool = False,
 ) -> list[str]:
     """Write one CSV file per target month enriched with 95th percentile metrics.
 
@@ -182,6 +213,9 @@ def write_month_csvs(
         rename_map = {k: v for k, v in _COLUMN_RENAME.items() if k in month_df.columns}
         month_df.rename(columns=rename_map, inplace=True)
 
+        if federal:
+            apply_federal_redaction(month_df)
+
         filename = f"{vco_name}.{month_label}.csv"
         full_path = str(Path(output_dir) / filename)
         month_df.to_csv(full_path, index=False, encoding="utf-8-sig")
@@ -198,6 +232,7 @@ def write_combined_csv(
     output_dir: str,
     *,
     include_peak: bool = False,
+    federal: bool = False,
 ) -> str:
     """Write a single CSV file with one row per edge and a Record Hash column.
 
@@ -271,6 +306,9 @@ def write_combined_csv(
         record_hashes.append(encode_record_hash(months_data, edge_uuid))
 
     result_df["Record Hash"] = record_hashes
+
+    if federal:
+        apply_federal_redaction(result_df)
 
     filename = f"{vco_name}.combined.csv"
     full_path = str(Path(output_dir) / filename)
