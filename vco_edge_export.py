@@ -27,7 +27,7 @@ from metrics import (
     SAMPLES_PER_DAY,
     validate_sample_count,
 )
-from output import write_month_csvs, write_combined_csv, create_zip_archive, create_encrypted_archive, build_output_metadata
+from output import write_month_csvs, write_combined_csv, create_zip_archive, create_encrypted_archive, build_output_metadata, apply_federal_redaction
 
 urllib3.disable_warnings(urllib3.exceptions.InsecureRequestWarning)
 
@@ -412,34 +412,38 @@ def build_parser() -> argparse.ArgumentParser:
         "--months",
         type=int,
         default=3,
-        help="Number of complete months to collect for 95th percentile metrics (default: 3).",
+        help=argparse.SUPPRESS,
     )
     time_group.add_argument(
         "--last_30_days",
         action="store_true",
         default=False,
-        help="Collect metrics for the trailing 30 days (including today) instead of complete calendar months.",
+        help=argparse.SUPPRESS,
     )
     parser.add_argument(
         "--all_metrics",
         action="store_true",
         default=False,
-        help="Include tx and rx columns in addition to total in the output CSVs. "
-             "By default only the total 95th percentile column is included.",
+        help=argparse.SUPPRESS,
     )
     parser.add_argument(
         "--strict_validation",
         action="store_true",
         default=False,
-        help="Abort on sample count mismatch instead of logging a warning.",
+        help=argparse.SUPPRESS,
     )
     parser.add_argument(
         "--diagnose",
         type=str,
         default=None,
         metavar="EDGE_NAME",
-        help="Troubleshoot metrics for a specific edge by name. "
-             "Prints detailed diagnostic output and exits.",
+        help=argparse.SUPPRESS,
+    )
+    parser.add_argument(
+        "--federal",
+        action="store_true",
+        default=False,
+        help="Redact sensitive customer and partner fields from output CSVs.",
     )
     return parser
 
@@ -610,7 +614,10 @@ if __name__ == "__main__":
     merged_df["Edge Status"] = merged_df["Edge Status"].fillna("")
 
     if obfuscation_mode != "1":
-        merged_df.to_csv(OUTPUT_CSV, index=False, encoding="utf-8-sig")
+        output_df = merged_df.copy()
+        if args.federal:
+            apply_federal_redaction(output_df)
+        output_df.to_csv(OUTPUT_CSV, index=False, encoding="utf-8-sig")
         print(
             f"Done. {len(merged_df)} rows written to '{OUTPUT_CSV}' "
             f"({matched_count} matched, {unmatched_count} unmatched)"
@@ -820,12 +827,14 @@ if __name__ == "__main__":
                 write_combined_csv(
                     merged_df, metrics_results, target_months, vco_host, output_dir,
                     include_peak=peak_supported,
+                    federal=args.federal,
                 )
             else:
                 write_month_csvs(
                     merged_df, metrics_results, target_months, vco_host, output_dir,
                     all_metrics=args.all_metrics,
                     include_peak=peak_supported,
+                    federal=args.federal,
                 )
             zip_filename = f"{output_dir}.zip"
             metadata = build_output_metadata(
