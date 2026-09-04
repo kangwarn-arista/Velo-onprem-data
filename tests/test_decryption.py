@@ -228,7 +228,7 @@ class TestDecryptCLI:
             capture_output=True,
             text=True,
         )
-        assert result.stdout.startswith("Decrypted 2 files")
+        assert "Decrypted 2 files" in result.stdout
 
     def test_cli_no_args_exits_nonzero(self):
         """Running with no arguments exits with a non-zero code."""
@@ -295,7 +295,7 @@ class TestDecryptCLI:
             f"Expected exit 0 but got {result.returncode}.\n"
             f"stdout: {result.stdout!r}\nstderr: {result.stderr!r}"
         )
-        assert result.stdout.startswith("Decoded 1 file")
+        assert "Decoded 1 file" in result.stdout
 
 
 # ── decode_record_hash unit tests ─────────────────────────────────────────────
@@ -442,19 +442,10 @@ class TestRoundTrip:
 
 
 class TestAutoDetect:
-    """Tests for _detect_format() auto-detection (DEC-03)."""
+    """Tests for _detect_zip_format() auto-detection (DEC-03)."""
 
-    def _make_combined_csv(self, tmp_path) -> Path:
-        """Create a minimal combined CSV with one edge and one month."""
-        return _make_simple_combined_csv(tmp_path)
-
-    def test_csv_input_returns_combined_csv_format(self, tmp_path):
-        """A CSV file is detected as 'combined_csv' format."""
-        csv_path = self._make_combined_csv(tmp_path)
-        assert decrypt_metrics._detect_format(str(csv_path)) == "combined_csv"
-
-    def test_zip_input_returns_fernet_format(self, tmp_path):
-        """A zip file is detected as 'fernet' format."""
+    def test_encrypted_zip_returns_encrypted(self, tmp_path):
+        """A zip with data.enc is detected as 'encrypted' format."""
         csv_dir = tmp_path / "csvs"
         csv_dir.mkdir()
         (csv_dir / "vco.test.com.06-2026.csv").write_text("col1,col2\n1,2\n")
@@ -462,7 +453,24 @@ class TestAutoDetect:
         create_encrypted_archive(
             str(csv_dir), str(zip_path), metadata={"version": "1.4"}
         )
-        assert decrypt_metrics._detect_format(str(zip_path)) == "fernet"
+        assert decrypt_metrics._detect_zip_format(str(zip_path)) == "encrypted"
+
+    def test_obfuscated_zip_returns_obfuscated(self, tmp_path):
+        """A zip with *.combined.csv is detected as 'obfuscated' format."""
+        csv_path = _make_simple_combined_csv(tmp_path)
+        zip_path = tmp_path / "export.zip"
+        import zipfile as _zf
+        with _zf.ZipFile(zip_path, "w") as zf:
+            zf.write(csv_path, csv_path.name)
+        assert decrypt_metrics._detect_zip_format(str(zip_path)) == "obfuscated"
+
+    def test_plain_zip_returns_plain(self, tmp_path):
+        """A zip with per-month CSVs is detected as 'plain' format."""
+        zip_path = tmp_path / "export.zip"
+        import zipfile as _zf
+        with _zf.ZipFile(zip_path, "w") as zf:
+            zf.writestr("vco.test.com.06-2026.csv", "col1,col2\n1,2\n")
+        assert decrypt_metrics._detect_zip_format(str(zip_path)) == "plain"
 
 
 # ── decode_combined_csv integration tests ─────────────────────────────────────

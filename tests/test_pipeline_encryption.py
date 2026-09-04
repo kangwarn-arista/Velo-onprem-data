@@ -70,15 +70,14 @@ class TestObfuscatedBranching:
         mock_enc.assert_not_called()
 
     def test_obfuscated_two_calls_encrypted(self, tmp_path):
-        """When OBFUSCATED is '2', the pipeline calls create_encrypted_archive (Fernet path)."""
+        """When obfuscation_mode='2', the pipeline calls create_encrypted_archive (Fernet path)."""
         csv_dir = self._make_csv_dir(tmp_path)
         zip_path = str(tmp_path / "out.zip")
         metadata = {"version": "1.0"}
 
-        with patch.dict(os.environ, {"OBFUSCATED": "2"}):
-            with patch("vco_edge_export.create_encrypted_archive", wraps=__import__("output").create_encrypted_archive) as mock_enc, \
-                 patch("vco_edge_export.create_zip_archive", wraps=__import__("output").create_zip_archive) as mock_zip:
-                package_and_cleanup(str(csv_dir), zip_path, metadata)
+        with patch("vco_edge_export.create_encrypted_archive", wraps=__import__("output").create_encrypted_archive) as mock_enc, \
+             patch("vco_edge_export.create_zip_archive", wraps=__import__("output").create_zip_archive) as mock_zip:
+            package_and_cleanup(str(csv_dir), zip_path, metadata, obfuscation_mode="2")
 
         mock_enc.assert_called_once()
         mock_zip.assert_not_called()

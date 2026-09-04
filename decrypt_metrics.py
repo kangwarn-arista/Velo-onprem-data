@@ -1,22 +1,25 @@
-"""Standalone offline tool for recovering metric CSVs from encrypted archives.
+"""Standalone offline tool for recovering metric CSVs from archives.
 
 This script is fully self-contained: it has no imports from the main project
 (crypto.py, output.py, etc.).  It embeds the Fernet key directly and only
 requires stdlib plus the ``cryptography`` package.
 
 Usage:
-    python decrypt_metrics.py <input-path> [output-dir]
+    python decrypt_metrics.py <zip-file> [<zip-file> ...] [-o OUTPUT_DIR]
 
 Args:
-    input-path  Path to either:
-                  - an encrypted zip file (Fernet, OBFUSCATED=2) — auto-detected
-                    via zipfile.is_zipfile(); OR
-                  - a combined CSV file (field-level, OBFUSCATED=1).
-    output-dir  Optional directory where output files are written.
-                Defaults to the same directory as the input file (for CSVs)
-                or a directory named after the zip stem (for archives).
+    zip-file    One or more zip files produced by vco_edge_export.py.
+                The format of each zip is auto-detected:
+                  - Encrypted (contains ``data.enc``) — Fernet decrypt + extract.
+                  - Field-level obfuscated (contains ``*.combined.csv``) —
+                    extract + decode Record Hash into per-month CSVs.
+                  - Plain (per-month CSVs) — extract only.
+    -o          Optional output directory.  Defaults to a directory named
+                after each zip's stem in the zip's parent directory.
 
-Archive format (produced by output.py::create_encrypted_archive):
+Supported archive formats:
+
+Encrypted archive (OBFUSCATED=2, produced by output.py::create_encrypted_archive):
     outer.zip
     ├── data.enc          Fernet-encrypted inner zip bytes
     └── _metadata.json    (optional) archive metadata
@@ -24,11 +27,15 @@ Archive format (produced by output.py::create_encrypted_archive):
     inner.zip (after decryption)
     └── *.csv             Original CSV files with metric data
 
-Combined CSV format (produced by output.py::write_combined_csv):
-    Single CSV with one row per edge, containing a Record Hash column that
-    encodes per-month metric data (Month-Year, 30 Days 95th, 30 Days P95 Peak).
-    Decoded output replaces Record Hash with those three columns, producing
-    one output row per edge per active month.
+Obfuscated archive (OBFUSCATED=1, produced by output.py::create_zip_archive):
+    outer.zip
+    ├── *.combined.csv    Single CSV with Record Hash column
+    └── _metadata.json    (optional) archive metadata
+
+Plain archive (OBFUSCATED=0, produced by output.py::create_zip_archive):
+    outer.zip
+    ├── *.MM-YYYY.csv     Per-month CSV files with cleartext metrics
+    └── _metadata.json    (optional) archive metadata
 """
 
 import base64
@@ -97,17 +104,31 @@ def _decode_metric(value: float) -> float:
     return value
 
 
-def _detect_format(path: str) -> str:
-    """Return 'fernet' if path is a zip archive, else 'combined_csv'.
+def _detect_zip_format(path: str) -> str:
+    """Classify a zip archive by inspecting its contents.
+
+    Returns:
+        ``"encrypted"``  — contains ``data.enc`` (Fernet-encrypted payload).
+        ``"obfuscated"`` — contains a ``*.combined.csv`` file.
+        ``"plain"``      — per-month CSVs or other files.
 
     Raises:
         FileNotFoundError: If *path* does not exist on disk.
+        zipfile.BadZipFile: If *path* is not a valid zip archive.
     """
-    if not Path(path).exists():
+    resolved = Path(path).resolve()
+    if not resolved.exists():
         raise FileNotFoundError(f"No such file: {path}")
-    if zipfile.is_zipfile(path):
-        return "fernet"
-    return "combined_csv"
+    if not zipfile.is_zipfile(path):
+        raise zipfile.BadZipFile(f"Not a zip file: {path}")
+
+    with zipfile.ZipFile(resolved, "r") as zf:
+        names = zf.namelist()
+        if "data.enc" in names:
+            return "encrypted"
+        if any(n.endswith(".combined.csv") for n in names):
+            return "obfuscated"
+        return "plain"
 
 
 def decode_record_hash(record_hash: str, edge_uuid: str) -> list[dict]:
@@ -290,6 +311,105 @@ def decode_combined_csv(csv_path: str, output_dir: str | None = None) -> Path:
     return out_dir
 
 
+def extract_plain_zip(zip_path: str, output_dir: str | None = None) -> Path:
+    """Extract a plain (unencrypted, unobfuscated) zip archive.
+
+    Args:
+        zip_path:   Path to the plain zip file.
+        output_dir: Directory where files are extracted.  When ``None``,
+                    defaults to the zip file's stem inside its parent directory.
+
+    Returns:
+        The resolved output directory path.
+
+    Raises:
+        FileNotFoundError: If ``zip_path`` does not exist.
+        ValueError:        If a member attempts path traversal.
+    """
+    resolved = Path(zip_path).resolve()
+    if not resolved.exists():
+        raise FileNotFoundError(f"No such file: {zip_path}")
+
+    if output_dir is None:
+        out_path = resolved.parent / resolved.stem
+    else:
+        out_path = Path(output_dir).resolve()
+
+    out_path.mkdir(parents=True, exist_ok=True)
+
+    expected_prefix = str(out_path.resolve()).rstrip(os.sep) + os.sep
+    with zipfile.ZipFile(resolved, "r") as zf:
+        for member in zf.infolist():
+            if member.filename.startswith("_"):
+                continue
+            member_path = (out_path / member.filename).resolve()
+            if not str(member_path).startswith(expected_prefix):
+                raise ValueError(
+                    f"Attempted path traversal in archive member: {member.filename!r}"
+                )
+            zf.extract(member, out_path)
+
+    return out_path
+
+
+def extract_and_decode_obfuscated(zip_path: str, output_dir: str | None = None) -> Path:
+    """Extract a zip containing a combined CSV and decode its Record Hashes.
+
+    Extracts the ``*.combined.csv`` file from the zip into a temporary
+    location, then delegates to :func:`decode_combined_csv` to produce
+    per-month output CSVs.
+
+    Args:
+        zip_path:   Path to the zip file containing a combined CSV.
+        output_dir: Directory where decoded per-month CSVs are written.
+                    When ``None``, defaults to the zip file's stem inside
+                    its parent directory.
+
+    Returns:
+        The resolved output directory path.
+
+    Raises:
+        FileNotFoundError: If ``zip_path`` does not exist.
+        KeyError:          If no ``*.combined.csv`` member is found.
+        ValueError:        If a member attempts path traversal.
+    """
+    resolved = Path(zip_path).resolve()
+    if not resolved.exists():
+        raise FileNotFoundError(f"No such file: {zip_path}")
+
+    if output_dir is None:
+        out_path = resolved.parent / resolved.stem
+    else:
+        out_path = Path(output_dir).resolve()
+
+    out_path.mkdir(parents=True, exist_ok=True)
+
+    with zipfile.ZipFile(resolved, "r") as zf:
+        combined_members = [n for n in zf.namelist() if n.endswith(".combined.csv")]
+        if not combined_members:
+            raise KeyError(
+                f"Archive '{zip_path}' has no '*.combined.csv' member."
+            )
+
+        expected_prefix = str(out_path.resolve()).rstrip(os.sep) + os.sep
+        extracted_csvs: list[Path] = []
+        for member_name in combined_members:
+            member_path = (out_path / member_name).resolve()
+            if not str(member_path).startswith(expected_prefix):
+                raise ValueError(
+                    f"Attempted path traversal in archive member: {member_name!r}"
+                )
+            zf.extract(member_name, out_path)
+            extracted_csvs.append(member_path)
+
+    final_out = out_path
+    for csv_path in extracted_csvs:
+        final_out = decode_combined_csv(str(csv_path), str(out_path))
+        csv_path.unlink()
+
+    return final_out
+
+
 def decrypt_archive(zip_path: str, output_dir: str | None = None) -> Path:
     """Decrypt an encrypted metrics archive and extract CSV files.
 
@@ -346,47 +466,92 @@ def decrypt_archive(zip_path: str, output_dir: str | None = None) -> Path:
     return out_path
 
 
+def process_zip(zip_path: str, output_dir: str | None = None) -> Path:
+    """Auto-detect a zip's format and extract/decrypt/decode accordingly.
+
+    Args:
+        zip_path:   Path to a zip file produced by vco_edge_export.py.
+        output_dir: Optional output directory override.
+
+    Returns:
+        The resolved output directory path.
+    """
+    fmt = _detect_zip_format(zip_path)
+    if fmt == "encrypted":
+        return decrypt_archive(zip_path, output_dir)
+    if fmt == "obfuscated":
+        return extract_and_decode_obfuscated(zip_path, output_dir)
+    return extract_plain_zip(zip_path, output_dir)
+
+
+_FORMAT_LABELS = {
+    "encrypted": "Decrypted",
+    "obfuscated": "Decoded",
+    "plain": "Extracted",
+}
+
+
 if __name__ == "__main__":
-    args = sys.argv[1:]
-    if not args:
-        print(
-            "Usage: python decrypt_metrics.py <input-path> [output-dir]",
-            file=sys.stderr,
-        )
-        sys.exit(1)
+    import argparse as _argparse
 
-    zip_arg = args[0]
-    out_arg = args[1] if len(args) > 1 else None
+    parser = _argparse.ArgumentParser(
+        description="Recover metric CSVs from archives produced by vco_edge_export.py.",
+    )
+    parser.add_argument(
+        "input_files",
+        nargs="+",
+        metavar="INPUT_FILE",
+        help="One or more zip files (or legacy: a single combined CSV) to process.",
+    )
+    parser.add_argument(
+        "-o", "--output-dir",
+        default=None,
+        metavar="DIR",
+        help=(
+            "Output directory. When processing a single zip, all files go here. "
+            "When processing multiple zips, each gets a subdirectory named "
+            "after its stem."
+        ),
+    )
+    cli_args = parser.parse_args()
 
-    fmt = _detect_format(zip_arg)
-    try:
-        if fmt == "fernet":
-            out_dir = decrypt_archive(zip_arg, out_arg)
-            csv_files = list(out_dir.glob("*.csv"))
-            print(f"Decrypted {len(csv_files)} files to {out_dir}")
+    errors = 0
+    for input_arg in cli_args.input_files:
+        if len(cli_args.input_files) > 1 and cli_args.output_dir:
+            out_arg = str(Path(cli_args.output_dir) / Path(input_arg).stem)
         else:
-            out_dir = decode_combined_csv(zip_arg, out_arg)
+            out_arg = cli_args.output_dir
+
+        try:
+            if zipfile.is_zipfile(input_arg):
+                fmt = _detect_zip_format(input_arg)
+                label = _FORMAT_LABELS[fmt]
+                out_dir = process_zip(input_arg, out_arg)
+            else:
+                label = "Decoded"
+                out_dir = decode_combined_csv(input_arg, out_arg)
+
             csv_files = list(out_dir.glob("*.csv"))
-            print(f"Decoded {len(csv_files)} files to {out_dir}")
-    except FileNotFoundError as exc:
-        print(f"Error: {exc}", file=sys.stderr)
-        sys.exit(1)
-    except KeyError as exc:
-        print(f"Error: {exc}", file=sys.stderr)
-        sys.exit(1)
-    except zipfile.BadZipFile:
-        print(
-            "Error: the file is not a valid zip archive or the archive is corrupt.",
-            file=sys.stderr,
-        )
-        sys.exit(1)
-    except InvalidToken:
-        print(
-            "Error: decryption failed — the archive may be corrupt or "
-            "was not produced by this tool.",
-            file=sys.stderr,
-        )
-        sys.exit(1)
-    except OSError as exc:
-        print(f"Error: cannot create output directory — {exc}", file=sys.stderr)
+            print(f"{label} {len(csv_files)} files to {out_dir}")
+        except FileNotFoundError as exc:
+            print(f"Error: {exc}", file=sys.stderr)
+            errors += 1
+        except KeyError as exc:
+            print(f"Error: {exc}", file=sys.stderr)
+            errors += 1
+        except zipfile.BadZipFile as exc:
+            print(f"Error: {input_arg}: {exc}", file=sys.stderr)
+            errors += 1
+        except InvalidToken:
+            print(
+                f"Error: {input_arg}: decryption failed — the archive may be "
+                f"corrupt or was not produced by this tool.",
+                file=sys.stderr,
+            )
+            errors += 1
+        except OSError as exc:
+            print(f"Error: {input_arg}: {exc}", file=sys.stderr)
+            errors += 1
+
+    if errors:
         sys.exit(1)

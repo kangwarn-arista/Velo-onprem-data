@@ -445,6 +445,23 @@ def build_parser() -> argparse.ArgumentParser:
         default=False,
         help="Redact sensitive customer and partner fields from output CSVs.",
     )
+    ent_group = parser.add_mutually_exclusive_group()
+    ent_group.add_argument(
+        "--enterprise-ids",
+        type=int,
+        nargs="+",
+        default=None,
+        metavar="ID",
+        help="Only include enterprises with these numeric IDs.",
+    )
+    ent_group.add_argument(
+        "--enterprise-names",
+        type=str,
+        nargs="+",
+        default=None,
+        metavar="NAME",
+        help="Only include enterprises whose name matches (case-insensitive).",
+    )
     return parser
 
 
@@ -505,6 +522,29 @@ if __name__ == "__main__":
         sys.exit(1)
 
     print(f"Found {len(enterprise_ids)} enterprises")
+
+    if args.enterprise_ids:
+        filter_set = set(args.enterprise_ids)
+        enterprise_ids = [e for e in enterprise_ids if e["id"] in filter_set]
+        matched_ids = {e["id"] for e in enterprise_ids}
+        missing = filter_set - matched_ids
+        if missing:
+            logging.warning("Enterprise IDs not found: %s", sorted(missing))
+        if not enterprise_ids:
+            print("ERROR: No enterprises matched the provided --enterprise-ids.")
+            sys.exit(1)
+        print(f"Filtered to {len(enterprise_ids)} enterprises by ID")
+    elif args.enterprise_names:
+        filter_names = {n.lower() for n in args.enterprise_names}
+        enterprise_ids = [e for e in enterprise_ids if e["name"].lower() in filter_names]
+        matched_names = {e["name"].lower() for e in enterprise_ids}
+        missing = filter_names - matched_names
+        if missing:
+            logging.warning("Enterprise names not found: %s", sorted(missing))
+        if not enterprise_ids:
+            print("ERROR: No enterprises matched the provided --enterprise-names.")
+            sys.exit(1)
+        print(f"Filtered to {len(enterprise_ids)} enterprises by name")
 
     # -- License CSV Export --
     license_export_response = get_network_license_export()

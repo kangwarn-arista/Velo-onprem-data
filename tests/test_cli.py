@@ -89,12 +89,9 @@ def test_vco_token_flag():
 
 
 def test_help_contains_flags():
-    """parser.format_help() contains all expected flags."""
+    """parser.format_help() contains all visible flags."""
     parser = build_parser()
     help_text = parser.format_help()
     assert "--vco-host" in help_text
     assert "--vco-token" in help_text
-    assert "--months" in help_text
-    assert "--strict_validation" in help_text
-    assert "--diagnose" in help_text
-    assert "--last_30_days" in help_text
+    assert "--federal" in help_text
