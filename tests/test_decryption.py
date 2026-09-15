@@ -63,11 +63,25 @@ def _make_simple_combined_csv(tmp_path, uuid=_TEST_UUID) -> Path:
     with open(csv_path, "w", encoding="utf-8-sig", newline="") as fh:
         writer = csv.DictWriter(
             fh,
-            fieldnames=["Edge UUID", "Edge Name", "Record Hash"],
+            fieldnames=[
+                "Edge UUID",
+                "Edge Name",
+                "Partner Id",
+                "Description",
+                "Edge Description",
+                "Record Hash",
+            ],
         )
         writer.writeheader()
         writer.writerow(
-            {"Edge UUID": uuid, "Edge Name": "edge1", "Record Hash": record_hash}
+            {
+                "Edge UUID": uuid,
+                "Edge Name": "edge1",
+                "Partner Id": "",
+                "Description": "customer description",
+                "Edge Description": "edge description",
+                "Record Hash": record_hash,
+            }
         )
     return csv_path
 
@@ -297,6 +311,28 @@ class TestDecryptCLI:
         )
         assert "Decoded 1 file" in result.stdout
 
+    def test_cli_keep_description_preserves_description(self, tmp_path):
+        """--keep_description preserves description fields in decoded CSVs."""
+        csv_path = self._make_combined_csv(tmp_path)
+        result = subprocess.run(
+            [
+                sys.executable,
+                "decrypt_metrics.py",
+                "--keep_description",
+                str(csv_path),
+            ],
+            cwd=str(_PROJECT_ROOT),
+            capture_output=True,
+            text=True,
+        )
+        assert result.returncode == 0, result.stderr
+
+        output_csv = tmp_path / "vco116.combined" / "vco116.07-2026.csv"
+        with open(output_csv, encoding="utf-8-sig") as fh:
+            row = next(csv.DictReader(fh))
+        assert row["Description"] == "customer description"
+        assert row["Edge Description"] == "edge description"
+
 
 # ── decode_record_hash unit tests ─────────────────────────────────────────────
 
@@ -490,7 +526,15 @@ class TestDecodeCombinedCsv:
         csv_path = tmp_path / "vco116.combined.csv"
         with open(csv_path, "w", encoding="utf-8-sig", newline="") as fh:
             writer = csv.DictWriter(
-                fh, fieldnames=["Edge UUID", "Edge Name", "Record Hash"]
+                fh,
+                fieldnames=[
+                    "Edge UUID",
+                    "Edge Name",
+                    "Partner Id",
+                    "Description",
+                    "Edge Description",
+                    "Record Hash",
+                ],
             )
             writer.writeheader()
             for row in rows:
@@ -502,6 +546,11 @@ class TestDecodeCombinedCsv:
                     {
                         "Edge UUID": row["uuid"],
                         "Edge Name": row["name"],
+                        "Partner Id": row.get("partner_id", "123456"),
+                        "Description": row.get("description", "description"),
+                        "Edge Description": row.get(
+                            "edge_description", "edge description"
+                        ),
                         "Record Hash": record_hash,
                     }
                 )
@@ -691,6 +740,69 @@ class TestDecodeCombinedCsv:
             rows = list(csv.DictReader(fh))
         assert rows[0]["30 Days 95th"] == "100"
         assert rows[0]["30 Days P95 Peak"] == "200"
+
+    @pytest.mark.parametrize("empty_partner_id", ["", "   "])
+    def test_empty_partner_id_defaults_to_999999(self, tmp_path, empty_partner_id):
+        """Empty and whitespace-only Partner Id values use the required default."""
+        csv_path = self._make_combined_csv(
+            tmp_path,
+            [
+                {
+                    "uuid": self.UUID,
+                    "name": "edge1",
+                    "partner_id": empty_partner_id,
+                    "months_data": [
+                        {"label": "07-2026", "95th": 100.0, "peak": 200.0}
+                    ],
+                }
+            ],
+        )
+
+        out = decrypt_metrics.decode_combined_csv(str(csv_path))
+        with open(out / "vco116.07-2026.csv", encoding="utf-8-sig") as fh:
+            row = next(csv.DictReader(fh))
+
+        assert row["Partner Id"] == "999999"
+
+    def test_nonempty_partner_id_is_preserved(self, tmp_path):
+        """A populated Partner Id is not replaced."""
+        csv_path = self._make_simple_csv(
+            tmp_path, [{"label": "07-2026", "95th": 100.0, "peak": 200.0}]
+        )
+
+        out = decrypt_metrics.decode_combined_csv(str(csv_path))
+        with open(out / "vco116.07-2026.csv", encoding="utf-8-sig") as fh:
+            row = next(csv.DictReader(fh))
+
+        assert row["Partner Id"] == "123456"
+
+    def test_description_fields_are_empty_by_default(self, tmp_path):
+        """Description text is redacted unless explicitly retained."""
+        csv_path = self._make_simple_csv(
+            tmp_path, [{"label": "07-2026", "95th": 100.0, "peak": 200.0}]
+        )
+
+        out = decrypt_metrics.decode_combined_csv(str(csv_path))
+        with open(out / "vco116.07-2026.csv", encoding="utf-8-sig") as fh:
+            row = next(csv.DictReader(fh))
+
+        assert row["Description"] == ""
+        assert row["Edge Description"] == ""
+
+    def test_keep_description_preserves_description_fields(self, tmp_path):
+        """Programmatic callers can retain both supported description columns."""
+        csv_path = self._make_simple_csv(
+            tmp_path, [{"label": "07-2026", "95th": 100.0, "peak": 200.0}]
+        )
+
+        out = decrypt_metrics.decode_combined_csv(
+            str(csv_path), keep_description=True
+        )
+        with open(out / "vco116.07-2026.csv", encoding="utf-8-sig") as fh:
+            row = next(csv.DictReader(fh))
+
+        assert row["Description"] == "description"
+        assert row["Edge Description"] == "edge description"
 
     def test_zero_metric_written_as_integer(self, tmp_path):
         """Zero metrics are written as '0', not '0.0'."""

@@ -199,7 +199,34 @@ def _float_to_int(value: float) -> int | float:
     return value
 
 
-def decode_combined_csv(csv_path: str, output_dir: str | None = None) -> Path:
+def _normalize_output_row(
+    row: dict[str, str | None],
+    *,
+    keep_description: bool,
+) -> dict[str, str | None]:
+    """Apply identity-field defaults and redaction to a decoded CSV row."""
+    normalized = row.copy()
+
+    partner_id = normalized.get("Partner Id")
+    if "Partner Id" in normalized and (
+        partner_id is None or not partner_id.strip()
+    ):
+        normalized["Partner Id"] = "999999"
+
+    if not keep_description:
+        for field_name in ("Description", "Edge Description"):
+            if field_name in normalized:
+                normalized[field_name] = ""
+
+    return normalized
+
+
+def decode_combined_csv(
+    csv_path: str,
+    output_dir: str | None = None,
+    *,
+    keep_description: bool = False,
+) -> Path:
     """Read a combined CSV, decode each Record Hash, write per-month CSVs.
 
     Reverses the field-level obfuscation produced by output.py::write_combined_csv.
@@ -222,6 +249,8 @@ def decode_combined_csv(csv_path: str, output_dir: str | None = None) -> Path:
         output_dir: Directory where per-month CSV files are written.  Defaults
                     to a directory named after the input file's stem inside the
                     input file's parent directory.
+        keep_description: Preserve Description fields in output rows.  By
+                          default, Description and Edge Description are blanked.
 
     Returns:
         Resolved :class:`~pathlib.Path` of the output directory containing
@@ -266,7 +295,10 @@ def decode_combined_csv(csv_path: str, output_dir: str | None = None) -> Path:
         for row in reader:
             edge_uuid = row.get("Edge UUID", "")
             record_hash = row.get("Record Hash", "")
-            base_row = {k: row[k] for k in base_fields}
+            base_row = _normalize_output_row(
+                {k: row[k] for k in base_fields},
+                keep_description=keep_description,
+            )
 
             try:
                 months = decode_record_hash(record_hash, edge_uuid)
@@ -352,7 +384,12 @@ def extract_plain_zip(zip_path: str, output_dir: str | None = None) -> Path:
     return out_path
 
 
-def extract_and_decode_obfuscated(zip_path: str, output_dir: str | None = None) -> Path:
+def extract_and_decode_obfuscated(
+    zip_path: str,
+    output_dir: str | None = None,
+    *,
+    keep_description: bool = False,
+) -> Path:
     """Extract a zip containing a combined CSV and decode its Record Hashes.
 
     Extracts the ``*.combined.csv`` file from the zip into a temporary
@@ -364,6 +401,7 @@ def extract_and_decode_obfuscated(zip_path: str, output_dir: str | None = None) 
         output_dir: Directory where decoded per-month CSVs are written.
                     When ``None``, defaults to the zip file's stem inside
                     its parent directory.
+        keep_description: Preserve Description fields in decoded CSV rows.
 
     Returns:
         The resolved output directory path.
@@ -404,7 +442,11 @@ def extract_and_decode_obfuscated(zip_path: str, output_dir: str | None = None) 
 
     final_out = out_path
     for csv_path in extracted_csvs:
-        final_out = decode_combined_csv(str(csv_path), str(out_path))
+        final_out = decode_combined_csv(
+            str(csv_path),
+            str(out_path),
+            keep_description=keep_description,
+        )
         csv_path.unlink()
 
     return final_out
@@ -466,12 +508,19 @@ def decrypt_archive(zip_path: str, output_dir: str | None = None) -> Path:
     return out_path
 
 
-def process_zip(zip_path: str, output_dir: str | None = None) -> Path:
+def process_zip(
+    zip_path: str,
+    output_dir: str | None = None,
+    *,
+    keep_description: bool = False,
+) -> Path:
     """Auto-detect a zip's format and extract/decrypt/decode accordingly.
 
     Args:
         zip_path:   Path to a zip file produced by vco_edge_export.py.
         output_dir: Optional output directory override.
+        keep_description: Preserve Description fields when decoding an
+                          obfuscated combined CSV.
 
     Returns:
         The resolved output directory path.
@@ -480,7 +529,11 @@ def process_zip(zip_path: str, output_dir: str | None = None) -> Path:
     if fmt == "encrypted":
         return decrypt_archive(zip_path, output_dir)
     if fmt == "obfuscated":
-        return extract_and_decode_obfuscated(zip_path, output_dir)
+        return extract_and_decode_obfuscated(
+            zip_path,
+            output_dir,
+            keep_description=keep_description,
+        )
     return extract_plain_zip(zip_path, output_dir)
 
 
@@ -513,6 +566,15 @@ if __name__ == "__main__":
             "after its stem."
         ),
     )
+    parser.add_argument(
+        "--keep_description",
+        "--keep-description",
+        action="store_true",
+        help=(
+            "Preserve Description fields in decoded CSVs. By default, "
+            "Description and Edge Description are blanked."
+        ),
+    )
     cli_args = parser.parse_args()
 
     errors = 0
@@ -526,10 +588,18 @@ if __name__ == "__main__":
             if zipfile.is_zipfile(input_arg):
                 fmt = _detect_zip_format(input_arg)
                 label = _FORMAT_LABELS[fmt]
-                out_dir = process_zip(input_arg, out_arg)
+                out_dir = process_zip(
+                    input_arg,
+                    out_arg,
+                    keep_description=cli_args.keep_description,
+                )
             else:
                 label = "Decoded"
-                out_dir = decode_combined_csv(input_arg, out_arg)
+                out_dir = decode_combined_csv(
+                    input_arg,
+                    out_arg,
+                    keep_description=cli_args.keep_description,
+                )
 
             csv_files = list(out_dir.glob("*.csv"))
             print(f"{label} {len(csv_files)} files to {out_dir}")
