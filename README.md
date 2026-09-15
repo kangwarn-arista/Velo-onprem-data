@@ -32,6 +32,21 @@ uv run python vco_edge_export.py --diagnose "edge-name"
 | `--strict_validation` | Abort on sample count mismatch instead of logging a warning |
 | `--diagnose EDGE_NAME` | Print detailed diagnostic output for a specific edge and exit |
 
+### `tools/event_report.py`
+
+Exports enterprise events from a VCO via JSON-RPC `event/getEnterpriseEvents`. Reads `VCO_HOST`/`VCO_TOKEN` from `.env` (same as `vco_edge_export.py`).
+
+```bash
+# Last 7 days (default)
+uv run python tools/event_report.py
+
+# Custom window
+uv run python tools/event_report.py --days 30
+
+# Override credentials
+uv run python tools/event_report.py --vco-host vco.example.com --vco-token "Token abc..."
+```
+
 ### `compare_exports.py`
 
 Compares a Maestro license export CSV against a VCO edge export CSV. Joins on Edge UUID and compares serial number, edge name, model, license, and status.
