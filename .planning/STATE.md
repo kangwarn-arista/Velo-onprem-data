@@ -4,8 +4,8 @@ milestone: v1.5
 milestone_name: Field-Level Obfuscation
 status: archived
 stopped_at: Milestone archived
-last_updated: 2026-08-25
-last_activity: 2026-08-25 -- Milestone v1.5 archived
+last_updated: 2026-09-15
+last_activity: 2026-09-15 - Completed quick task 260915-kmy: Add a tools/ directory and tools/event_report.py
 progress:
   total_phases: 2
   completed_phases: 2
@@ -29,7 +29,7 @@ Phase: —
 Plan: —
 Status: Between milestones
 Progress: [##########] 100% (2/2 phases complete)
-Last activity: 2026-08-25
+Last activity: 2026-09-15 - Completed quick task 260915-kmy: Add a tools/ directory and tools/event_report.py
 
 ## Performance Metrics
 
@@ -58,8 +58,15 @@ Decisions are logged in PROJECT.md Key Decisions table.
 | Format Evolution | FMT-01: Named field slots with versioned header | Future release | 2026-08-24 |
 | Format Evolution | FMT-02: Gateway traffic volume field in Record Hash | Future release | 2026-08-24 |
 
+### Quick Tasks Completed
+
+| # | Description | Date | Commit | Directory |
+|---|-------------|------|--------|-----------|
+| 260915-kps | Normalize decoded CSV identity fields and add `--keep_description` | 2026-09-15 | 1b39432 | [260915-kps-update-decrypt-metrics-py-final-csv-outp](./quick/260915-kps-update-decrypt-metrics-py-final-csv-outp/) |
+| 260915-kmy | Add a tools/ directory and tools/event_report.py | 2026-09-15 | 3b98c18 | [260915-kmy-add-a-tools-directory-and-tools-event-re](./quick/260915-kmy-add-a-tools-directory-and-tools-event-re/) |
+
 ## Session Continuity
 
-Last session: 2026-08-25
-Stopped at: v1.5 archived. Start next milestone with /gsd:new-milestone.
+Last session: 2026-09-15
+Stopped at: v1.5 archived. Quick task 260915-kmy shipped tools/event_report.py. Start next milestone with /gsd:new-milestone.
 Resume file: None
