@@ -172,6 +172,14 @@ A self-contained binary bundles Python, all dependencies, and the application co
 
 The project includes a `Makefile` that auto-detects all imports and generates the correct build flags for either tool.
 
+Before the first build, prepare the build environment:
+
+```bash
+make prep
+```
+
+On macOS this installs missing tools with Homebrew (including Pandoc and BasicTeX). On Ubuntu/Debian it installs the compiler, Pandoc, TeX Live, `patchelf`, and `zip` with `apt`. It also installs `uv` when needed and runs `uv sync --all-groups`.
+
 ### PyInstaller
 
 PyInstaller is already included as a dev dependency.
@@ -183,8 +191,8 @@ make pyinstaller
 ```
 
 This will:
-1. Run `uv sync` to ensure dependencies are installed
-2. Install `pyinstaller` as a dev dependency if not already present
+1. Run `uv sync --all-groups` to ensure dependencies are installed
+2. Verify that the PyInstaller dev dependency is available
 3. Auto-detect all local and third-party imports from the script
 4. Build a single-file binary
 
@@ -214,8 +222,8 @@ make nuitka
 ```
 
 This will:
-1. Run `uv sync` to ensure dependencies are installed
-2. Install `nuitka` as a dev dependency if not already present
+1. Run `uv sync --all-groups` to ensure dependencies are installed
+2. Verify that the Nuitka dev dependency is available
 3. Auto-detect all local and third-party imports from the script
 4. Compile to C and build a single-file binary
 
