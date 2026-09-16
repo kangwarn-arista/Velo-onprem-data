@@ -5,7 +5,7 @@ milestone_name: Field-Level Obfuscation
 status: archived
 stopped_at: Milestone archived
 last_updated: 2026-09-15
-last_activity: 2026-09-15 - Completed quick task 260915-kmy: Add a tools/ directory and tools/event_report.py
+last_activity: 2026-09-15 - Completed quick task 260915-rl4: Overwrite export HA from get_edges serials
 progress:
   total_phases: 2
   completed_phases: 2
@@ -29,7 +29,7 @@ Phase: —
 Plan: —
 Status: Between milestones
 Progress: [##########] 100% (2/2 phases complete)
-Last activity: 2026-09-15 - Completed quick task 260915-kmy: Add a tools/ directory and tools/event_report.py
+Last activity: 2026-09-15 - Completed quick task 260915-rl4: Overwrite export HA from get_edges serials
 
 ## Performance Metrics
 
@@ -64,9 +64,10 @@ Decisions are logged in PROJECT.md Key Decisions table.
 |---|-------------|------|--------|-----------|
 | 260915-kps | Normalize decoded CSV identity fields and add `--keep_description` | 2026-09-15 | 1b39432 | [260915-kps-update-decrypt-metrics-py-final-csv-outp](./quick/260915-kps-update-decrypt-metrics-py-final-csv-outp/) |
 | 260915-kmy | Add a tools/ directory and tools/event_report.py | 2026-09-15 | 3b98c18 | [260915-kmy-add-a-tools-directory-and-tools-event-re](./quick/260915-kmy-add-a-tools-directory-and-tools-event-re/) |
+| 260915-rl4 | Overwrite merged export HA from get_edges haSerialNumber | 2026-09-15 | 938c427 | [260915-rl4-enhance-vco-edge-export-py-when-calling-](./quick/260915-rl4-enhance-vco-edge-export-py-when-calling-/) |
 
 ## Session Continuity
 
 Last session: 2026-09-15
-Stopped at: v1.5 archived. Quick task 260915-kmy shipped tools/event_report.py. Start next milestone with /gsd:new-milestone.
+Stopped at: Completed 260915-rl4-PLAN.md. HA overwrite shipped in vco_edge_export.py. Start next milestone with /gsd:new-milestone.
 Resume file: None
