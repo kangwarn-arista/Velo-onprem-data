@@ -178,7 +178,7 @@ Before the first build, prepare the build environment:
 make prep
 ```
 
-On macOS this installs missing tools with Homebrew (including Pandoc and BasicTeX). On Ubuntu/Debian it installs the compiler, Pandoc, TeX Live, `patchelf`, and `zip` with `apt`. It also installs `uv` when needed and runs `uv sync --all-groups`.
+On macOS this installs missing tools with Homebrew (including Pandoc and BasicTeX). On Ubuntu/Debian it installs the compiler, Pandoc, TeX Live, `patchelf`, and `zip`. Ubuntu 18.04 uses the official Pandoc 3.1.1 AMD64 package and additional TeX packages because its repository Pandoc is too old for the bundle documentation. The target also installs `uv` when needed and runs `uv sync --all-groups`.
 
 ### PyInstaller
 

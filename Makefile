@@ -1,5 +1,7 @@
 MAIN_SCRIPT := vco_edge_export.py
 BINARY_NAME := vco_edge_export
+UBUNTU_18_PANDOC_VERSION := 3.1.1
+UBUNTU_18_PANDOC_DEB_URL := https://github.com/jgm/pandoc/releases/download/$(UBUNTU_18_PANDOC_VERSION)/pandoc-$(UBUNTU_18_PANDOC_VERSION)-1-amd64.deb
 UV ?= $(shell command -v uv 2>/dev/null || \
 	for candidate in "$$HOME/.local/bin/uv" "$$HOME/.cargo/bin/uv" \
 		/opt/homebrew/bin/uv /usr/local/bin/uv; do \
@@ -115,23 +117,54 @@ prep:
 				*ubuntu*|*debian*) ;; \
 				*) echo "ERROR: Only Ubuntu/Debian Linux is supported (found $${ID:-unknown})." >&2; exit 1 ;; \
 			esac; \
+			if [ "$$(id -u)" -ne 0 ] && ! command -v sudo >/dev/null 2>&1; then \
+				echo "ERROR: sudo is required to install system packages." >&2; \
+				exit 1; \
+			fi; \
+			run_as_root() { \
+				if [ "$$(id -u)" -eq 0 ]; then "$$@"; else sudo "$$@"; fi; \
+			}; \
+			PACKAGES="build-essential curl patchelf texlive-latex-base \
+				texlive-latex-recommended texlive-fonts-recommended zip"; \
+			IS_UBUNTU_18=false; \
+			if [ "$${ID:-}" = "ubuntu" ] && [ "$${VERSION_ID:-}" = "18.04" ]; then \
+				IS_UBUNTU_18=true; \
+				if [ "$$(dpkg --print-architecture)" != "amd64" ]; then \
+					echo "ERROR: The Ubuntu 18.04 Pandoc package is available only for amd64." >&2; \
+					exit 1; \
+				fi; \
+				PACKAGES="$$PACKAGES wget texlive-generic-extra texlive-latex-extra"; \
+			else \
+				PACKAGES="$$PACKAGES pandoc"; \
+			fi; \
 			MISSING=""; \
-			for package in build-essential curl pandoc patchelf texlive-latex-base \
-				texlive-latex-recommended texlive-fonts-recommended zip; do \
+			for package in $$PACKAGES; do \
 				STATUS="$$(dpkg-query -W -f='$${Status}' "$$package" 2>/dev/null || true)"; \
 				[ "$$STATUS" = "install ok installed" ] || MISSING="$$MISSING $$package"; \
 			done; \
 			if [ -n "$$MISSING" ]; then \
 				echo "Installing Ubuntu packages:$$MISSING"; \
-				if [ "$$(id -u)" -eq 0 ]; then \
-					apt-get update; \
-					DEBIAN_FRONTEND=noninteractive apt-get install -y $$MISSING; \
-				elif command -v sudo >/dev/null 2>&1; then \
-					sudo apt-get update; \
-					sudo env DEBIAN_FRONTEND=noninteractive apt-get install -y $$MISSING; \
-				else \
-					echo "ERROR: sudo is required to install:$$MISSING" >&2; \
-					exit 1; \
+				run_as_root apt-get update; \
+				run_as_root env DEBIAN_FRONTEND=noninteractive apt-get install -y $$MISSING; \
+			fi; \
+			if [ "$$IS_UBUNTU_18" = "true" ]; then \
+				INSTALLED_PANDOC_VERSION="$$(pandoc --version 2>/dev/null | sed -n '1s/^pandoc //p')"; \
+				if [ -z "$$INSTALLED_PANDOC_VERSION" ] || \
+					! dpkg --compare-versions "$$INSTALLED_PANDOC_VERSION" ge "$(UBUNTU_18_PANDOC_VERSION)"; then \
+					echo "Installing Pandoc $(UBUNTU_18_PANDOC_VERSION) for Ubuntu 18.04..."; \
+					PANDOC_DEB="$$(mktemp /tmp/pandoc-$(UBUNTU_18_PANDOC_VERSION)-XXXXXX)"; \
+					if ! wget -q --show-progress -O "$$PANDOC_DEB" "$(UBUNTU_18_PANDOC_DEB_URL)"; then \
+						rm -f "$$PANDOC_DEB"; \
+						echo "ERROR: Failed to download Pandoc $(UBUNTU_18_PANDOC_VERSION)." >&2; \
+						exit 1; \
+					fi; \
+					run_as_root apt-get purge -y --auto-remove pandoc; \
+					if ! run_as_root dpkg -i "$$PANDOC_DEB"; then \
+						rm -f "$$PANDOC_DEB"; \
+						echo "ERROR: Failed to install Pandoc $(UBUNTU_18_PANDOC_VERSION)." >&2; \
+						exit 1; \
+					fi; \
+					rm -f "$$PANDOC_DEB"; \
 				fi; \
 			fi; \
 			if [ -z "$$UV_BIN" ]; then \
