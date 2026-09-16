@@ -640,6 +640,7 @@ if __name__ == "__main__":
                     "Edge Name": edge.get("name", ""),
                     "Edge UUID": edge.get("logicalId", ""),
                     "Edge Status": edge.get("edgeState", ""),
+                    "HA": ha_serial_from_edge(edge),
                 }
             )
             if collect_95th:
@@ -661,7 +662,7 @@ if __name__ == "__main__":
 
     edge_status_df = pd.DataFrame(
         edge_status_rows,
-        columns=["Customer Name", "Edge Name", "Edge UUID", "Edge Status"],
+        columns=["Customer Name", "Edge Name", "Edge UUID", "Edge Status", "HA"],
     )
     print(
         f"Edge status data: {len(edge_status_df)} edges collected across all enterprises"
@@ -699,6 +700,7 @@ if __name__ == "__main__":
 
     merged_df["Edge UUID"] = merged_df["Edge UUID"].fillna("")
     merged_df["Edge Status"] = merged_df["Edge Status"].fillna("")
+    overwrite_ha_from_edges(merged_df, edge_status_df)
 
     if obfuscation_mode != "1":
         output_df = merged_df.copy()
