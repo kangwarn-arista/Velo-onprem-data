@@ -192,6 +192,53 @@ def get_edges(ent):
     return api_call(method, params)
 
 
+def ha_serial_from_edge(edge: dict) -> str:
+    """Return the top-level HA serial from a get_edges() edge dict.
+
+    Reads only ``edge["haSerialNumber"]``. Nested ``ha`` objects are ignored.
+    JSON null, a missing key, an empty string, and whitespace-only values
+    become ``""``. The literal string ``"null"`` is kept.
+    """
+    if "haSerialNumber" not in edge:
+        return ""
+    value = edge["haSerialNumber"]
+    if value is None:
+        return ""
+    return str(value).strip()
+
+
+def overwrite_ha_from_edges(
+    merged_df: pd.DataFrame, edge_status_df: pd.DataFrame
+) -> pd.DataFrame:
+    """Overwrite merged_df HA from edge_status_df, keyed by Customer Name + Edge Name.
+
+    Mutates ``merged_df`` in place and returns it (same pattern as
+    ``apply_federal_redaction``). Existing HA column position is preserved.
+    Unmatched license rows become blank even if the license CSV had a value.
+    """
+    lookup: dict[tuple, str] = {}
+    if (
+        not edge_status_df.empty
+        and "Customer Name" in edge_status_df.columns
+        and "Edge Name" in edge_status_df.columns
+    ):
+        if "HA" in edge_status_df.columns:
+            ha_values = edge_status_df["HA"]
+        else:
+            ha_values = pd.Series("", index=edge_status_df.index)
+        for cust, name, ha in zip(
+            edge_status_df["Customer Name"],
+            edge_status_df["Edge Name"],
+            ha_values,
+        ):
+            lookup[(cust, name)] = "" if pd.isna(ha) else ha
+
+    keys = zip(merged_df["Customer Name"], merged_df["Edge Name"])
+    ha_column = [lookup.get(key, "") for key in keys]
+    merged_df["HA"] = ha_column
+    return merged_df
+
+
 def get_network_license_export() -> dict:
     """Fetch the network-wide license CSV export from VCO.
 
